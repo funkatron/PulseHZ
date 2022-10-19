@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Loopatron Demos/Tests</title>
+    <style>
+        /** @TODO move to external stylesheet - EF 2022-10-19 */
+        .loopatron-grid {
+            display: flex;
+            flex-wrap: wrap;
+            /* wrap as column */
+            /*grid-template-columns: 1fr 1fr;*/
+            /*grid-template-rows: 1fr 1fr;*/
+            /*grid-gap: 0px;*/
+        }
+
+        .loopatron-renderer {
+        }
+
+        .loopatron-renderer__output {
+            /* note: don't set height or width here. We want to set <canvas> size directly
+             See https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_usage
+             */
+            border: 1px solid black;
+            margin: 0;
+            padding: 0;
+        }
+
+        .loopatron-renderer__output__canvas {
+            background-color: transparent;
+        }
+    </style>
+</head>
+<body>
+
+<div class="loopatron-grid">
+    <div class="loopatron-renderer">
+        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+                id="canvas1"
+                height="384"
+                width="384"></canvas>
+    </div>
+    <div class="loopatron-renderer">
+        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+                id="canvas2"
+                height="384"
+                width="384"></canvas>
+    </div>
+    <div class="loopatron-renderer">
+        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+                id="canvas3"
+                height="384"
+                width="384"></canvas>
+    </div>
+    <div class="loopatron-renderer">
+        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+                id="canvas4"
+                height="384"
+                width="384"></canvas>
+    </div>
+</div>
+
+<script type="module">
+    import {LoopatronArrangement} from "./src/LoopatronArrangement.js";
+    import {LoopatronRenderer} from "./src/LoopatronRenderer.js";
+    import {LoopatronGenerators} from "./src/LoopatronGenerators.js";
+    import canvasOutputFunctions from "./src/canvas/canvasOutputFunctions.js";
+    import valueHelpers from "./src/valueHelpers.js";
+    import {DEFAULT_STEP_INCREMENT_SINE} from "./src/consts.js";
+
+    const renderer1 = new LoopatronRenderer(
+        LoopatronGenerators.sine,
+        document.getElementById("canvas1"),
+        /**
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            canvasOutputFunctions.renderCircle(t, v);
+
+            // scale the value to radians
+            let rotationValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue * DEFAULT_STEP_INCREMENT_SINE});
+        }
+    );
+
+    const renderer2 = new LoopatronRenderer(
+        LoopatronGenerators.ramp,
+        document.getElementById("canvas2"),
+        /**
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            canvasOutputFunctions.renderXYAxes(t, {x: v});
+        }
+    );
+
+    const renderer3 = new LoopatronRenderer(
+        LoopatronGenerators.sine,
+        document.getElementById("canvas3"),
+        /**
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            canvasOutputFunctions.renderRedVerticalLine(t, v);
+        }
+    );
+
+    const renderer4 = new LoopatronRenderer(
+        LoopatronGenerators.sine,
+        document.getElementById("canvas4"),
+        /**
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            canvasOutputFunctions.renderXYAxes(t, {rotation: v * DEFAULT_STEP_INCREMENT_SINE});
+            canvasOutputFunctions.renderCircleLine(t, v);
+            canvasOutputFunctions.renderCircle(t, v);
+            canvasOutputFunctions.renderGreenCircles(t, v);
+        }
+    );
+
+    const renderer5 = new LoopatronRenderer(
+        LoopatronGenerators.sine,
+        document.getElementById("canvas3"),
+        /**
+         * @param syncStep
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            // split this string into lines
+            const C64DISASM_EN = `.,ACB8 20 06 A9 JSR $A906       scan for next BASIC statement ([:] or [EOL])
+.,ACBB C8       INY             increment index to next byte
+.,ACBC AA       TAX             copy byte to X
+.,ACBD D0 12    BNE $ACD1       branch if ":"
+.,ACBF A2 0D    LDX #$0D        else set error $0D, out of data error
+.,ACC1 C8       INY             increment index to next line pointer high byte
+.,ACC2 B1 7A    LDA ($7A),Y     get next line pointer high byte
+.,ACC4 F0 6C    BEQ $AD32       branch if program end, eventually does error X
+.,ACC6 C8       INY             increment index
+.,ACC7 B1 7A    LDA ($7A),Y     get next line # low byte
+.,ACC9 85 3F    STA $3F         save current DATA line low byte
+.,ACCB C8       INY             increment index
+.,ACCC B1 7A    LDA ($7A),Y     get next line # high byte
+.,ACCE C8       INY             increment index
+.,ACCF 85 40    STA $40         save current DATA line high byte
+.,ACD1 20 FB A8 JSR $A8FB       add Y to the BASIC execute pointer
+.,ACD4 20 79 00 JSR $0079       scan memory
+.,ACD7 AA       TAX             copy the byte
+.,ACD8 E0 83    CPX #$83        compare it with token for DATA
+.,ACDA D0 DC    BNE $ACB8       loop if not DATA
+.,ACDC 4C 51 AC JMP $AC51       continue evaluating READ
+.,ACDF A5 43    LDA $43         get READ pointer low byte
+.,ACE1 A4 44    LDY $44         get READ pointer high byte
+.,ACE3 A6 11    LDX $11         get INPUT mode flag, $00 = INPUT, $40 = GET, $98 = READ
+.,ACE5 10 03    BPL $ACEA       branch if INPUT or GET`;
+            const lines = C64DISASM_EN.split("\n");
+            const line = lines[Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))];
+            canvasOutputFunctions.renderText(t, line, {
+                x: -24,
+                y: v,
+                font: '24px monospace',
+                fillStyle: 'black'
+            });
+        }
+    );
+
+    const renderer6 = new LoopatronRenderer(
+        LoopatronGenerators.ramp,
+        document.getElementById("canvas2"),
+        /**
+         * @param {Number} v
+         * @param {HTMLCanvasElement} t
+         */
+        (syncStep, v, t) => {
+            let scaledValue = valueHelpers.scaleValue(v, [0 - t.width, t.width])  * 0.01;
+            // translate to center
+            // draw a dot that rotates around the center of the canvas
+            const orbitRadius = t.width * 0.5;
+            const x = Math.cos(scaledValue) * orbitRadius + t.width * 0.5;
+            const y = Math.sin(scaledValue) * orbitRadius + t.height * 0.5;
+            // make "blink" effect
+            const blinkValue = Math.sin(scaledValue * 2);
+            const blinkScale = valueHelpers.scaleValue(blinkValue, [0, 1], [0.5, 1]);
+
+            canvasOutputFunctions.renderCircle(t, v, {x, y, radius: 20, fillStyle: blinkScale ? 'red' : 'black'});
+        })
+
+    const arrangement = new LoopatronArrangement([
+        renderer1,
+        renderer2,
+        renderer3,
+        renderer4,
+        renderer5,
+        renderer6,
+    ]);
+    arrangement.play();
+</script>
+</body>
+</html>
