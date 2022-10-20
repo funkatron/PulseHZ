@@ -177,13 +177,49 @@
          */
         (syncStep, v, t) => {
             // draw a dot that rotates around the center of the canvas
-            const orbitRadius = t.width * 0.5;
-            // scale to radians
-            const scaledValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
-            const x = Math.cos(scaledValue) * orbitRadius + (t.width * 0.5);
-            const y = Math.sin(scaledValue) * orbitRadius + (t.height * 0.5);
+            let orbitRadius = t.width / 2;
 
-            canvasOutputFunctions.renderCircle(t, v, {x, y, radius: 20});
+            // scale to radians
+            let radiansValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+            let x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+            let y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+            let radius = 20;
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: x,
+                    y: y,
+                    radius: radius,
+                }
+            );
+            // canvasOutputFunctions.renderRedVerticalLine(t, x + radius);
+
+
+            // draw a line from the side of the canvas to the dot
+            orbitRadius = t.width / 3;
+            x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+            y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: x,
+                    y: y,
+                    radius: 10
+                }
+            );
+
+            orbitRadius = t.width / 4;
+            x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+            y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: x,
+                    y: y,
+                    radius: 5
+                }
+            );
+
         })
 
     const arrangement = new LoopatronArrangement([

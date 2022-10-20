@@ -71,6 +71,8 @@ export default {
         const circleRadius = canvas.height / 2;
         const circleX = 0;
         const circleY = valueHelpers.scaleValue(genValue, [0, canvas.height]);
+        const startAngle = 0;
+        const endAngle = 2 * Math.PI;
 
         let ctx = canvas.getContext('2d')
         ctx.beginPath()
@@ -78,13 +80,24 @@ export default {
             options.x || circleX,
             options.y || circleY,
             options.radius || circleRadius,
-            0,
-            2 * Math.PI
+            options.startAngle || startAngle,
+            options.endAngle || endAngle
         )
-        ctx.fillStyle = options.fillStyle || 'black'
-        // ctx.fill();
-        ctx.stroke();
+
+        // store previous ctx options
+        const previousFillStyle = ctx.fillStyle;
+        const previousStrokeStyle = ctx.strokeStyle;
+
+        if (options.fillStyle) {
+            ctx.fillStyle = options.fillStyle;
+        }
+        ctx.fill();
+
+        // restore previous ctx options
+        ctx.fillStyle = previousFillStyle;
+        ctx.strokeStyle = previousStrokeStyle;
     },
+
 
     /**
      * @param {HTMLCanvasElement} canvas
@@ -103,6 +116,31 @@ export default {
         ctx.lineWidth = line_width;
         ctx.stroke();
         ctx.closePath();
+
+        // this.renderText(canvas, `GEN:${genValue} \\\ SCALED ${line_x}`);
+    },
+
+    /**
+     * @param {HTMLCanvasElement} canvas
+     * @param {Number} genValue
+     */
+    renderRedHorizontalLine(canvas, genValue) {
+        let ctx = canvas.getContext('2d');
+        // draw a line from top to bottom of the canvas
+        let lineY = valueHelpers.scaleValue(genValue, [0, canvas.height]);
+
+        // backup ctx settings
+        const previousStrokeStyle = ctx.strokeStyle;
+
+        ctx.beginPath()
+        ctx.moveTo(canvas.width, lineY)
+        ctx.lineTo(lineY, canvas.height)
+        ctx.strokeStyle = "red";
+        ctx.stroke();
+        ctx.closePath();
+
+        // restore ctx settings
+        ctx.strokeStyle = previousStrokeStyle;
 
         // this.renderText(canvas, `GEN:${genValue} \\\ SCALED ${line_x}`);
     },
