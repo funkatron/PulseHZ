@@ -1,5 +1,5 @@
-import canvasHelpers from './canvas/canvasHelpers.js';
 import {DEFAULT_FPS} from "./consts.js";
+import canvasOutputFunctions from "./canvas/canvasOutputFunctions.js";
 
 /**
  * @typedef {Object} LoopatronArrangement
@@ -60,7 +60,7 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
 
                 // clear outputs
                 let clearPromises = this.renderers.map(r => {
-                    canvasHelpers.clearCanvas(r.outputTarget);
+                    canvasOutputFunctions.clearCanvas(r.renderTarget);
                 });
                 await Promise.all(clearPromises);
                 console.debug(`S[${this.syncStep}] cleared ${clearPromises.length} canvasses`);

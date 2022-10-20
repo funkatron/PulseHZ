@@ -1,7 +1,7 @@
 import valueHelpers from "./valueHelpers.js";
 import {DEFAULT_STEP_INCREMENT, DEFAULT_STEP_INCREMENT_SINE, GEN_MAX, GEN_MIN} from "./consts.js";
 
-export const LoopatronGenerators = {
+export const valueFunctions = {
     ramp(syncStep = 0, minVal = GEN_MIN, maxVal = GEN_MAX, stepIncrement = DEFAULT_STEP_INCREMENT) {
         let val = syncStep * stepIncrement;
         if (syncStep > maxVal) {

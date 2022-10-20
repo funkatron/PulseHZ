@@ -1,50 +1,81 @@
 /**
- * @constructor
- * @typedef {Object} LoopatronRenderer
+ *
  * @property {function(Number): Number} valueFunction
- * @property {function(Number, HTMLElement): Number} outputFunction
- * @property {HTMLElement} outputTarget
- * @property {function(Number): void} render
+ * @property {function(Number, Number, HTMLElement)} renderFunction
+ * @property {HTMLElement} renderTarget
+ * @property {function(Number)} render
+ * @property {function(function(Number, Number, HTMLElement)): void} setOutputFunction
  * @property {function(HTMLElement): void} setOutputTarget
- * @property {function(function(Number, HTMLElement): Number): void} setOutputFunction
  * @property {function(function(Number): Number): void} setValueFunction
  */
 
 /**
+ * @class LoopatronRenderer
  * @param {function(Number): Number} valueFunction
- * @param {HTMLElement} outputTarget
- * @param {function(Number, Number, *)} outputFunction a function that takes a value and an outputTarget and renders it. The outputTarget can be anything, but is usually an HTML element.
- * @returns {LoopatronRenderer}
+ * @param {HTMLElement} renderTarget
+ * @param {function(Number, Number, HTMLElement)} renderFunction
+ * @returns {LoopatronRenderer} a LoopatronRenderer
  */
-let LoopatronRenderer = function (valueFunction, outputTarget, outputFunction) {
+let LoopatronRenderer = function (valueFunction, renderTarget, renderFunction) {
 
-    return {
-        valueFunction: valueFunction,
-        outputFunction: outputFunction,
-        outputTarget: outputTarget,
+    if (!valueFunction) {
+        throw new Error("valueFunction is required");
+    }
+    if (!renderTarget) {
+        throw new Error("renderTarget is required");
+    }
+    if (!renderFunction) {
+        throw new Error("renderFunction is required");
+    }
+
+    let loopatronRenderer = {
+        /**
+         * @type {function(Number): Number}
+         */
+        valueFunction: null,
+        /**
+         * @type {function(Number, Number, HTMLElement)}
+         */
+        renderFunction: null,
+        /**
+         * @type {HTMLElement}
+         */
+        renderTarget: null,
 
         /**
          * @param {Number} syncStep
          */
         async render(syncStep = 0) {
             let value = this.valueFunction(syncStep);
-            this.outputFunction(syncStep, value, this.outputTarget);
+            this.renderFunction(syncStep, value, this.renderTarget);
+        },
+
+        /**
+         * @param {function(Number): Number} valueFunction
+         */
+        setValueFunction: function (valueFunction) {
+            this.valueFunction = valueFunction;
         },
 
         /**
          * @param {HTMLElement} target
          */
-        setOutputTarget(target) {
-            this.outputTarget = target;
+        setRenderTarget(target) {
+            this.renderTarget = target;
         },
 
         /**
-         * @param {function(Number, HTMLElement): Number} outputFunction a function that takes a value and an output target and interacts with the output target in some way
+         * @param {function(Number, Number, HTMLElement)} outputFunction a function that takes a value and an output target and interacts with the output target in some way
          */
-        setOutputFunction(outputFunction) {
-            this.outputFunction = outputFunction;
+        setRenderFunction(outputFunction) {
+            this.renderFunction = outputFunction;
         }
     }
+
+    loopatronRenderer.setValueFunction(valueFunction);
+    loopatronRenderer.setRenderTarget(renderTarget);
+    loopatronRenderer.setRenderFunction(renderFunction);
+    return loopatronRenderer;
 }
 
 
