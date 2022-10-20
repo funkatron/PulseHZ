@@ -7,7 +7,6 @@ export default {
      * @param {Number} options.x the x position of the canvas. Default is 0
      * @param {Number} options.y the y position of the canvas. Default is 0
      *
-     *
      * @returns {CanvasRenderingContext2D}
      */
     renderXYAxes(canvas, options) {  // x = NaN, y = NaN, rotation = NaN) {
@@ -71,8 +70,6 @@ export default {
     renderCircle(canvas, genValue, options = {}) {
         const circleRadius = canvas.height / 2;
         const circleX = 0;
-        // const circleY = genValue || canvas.height / 2;
-        // scale from top to bottom
         const circleY = valueHelpers.scaleValue(genValue, [0, canvas.height]);
 
         let ctx = canvas.getContext('2d')
@@ -82,10 +79,11 @@ export default {
             options.y || circleY,
             options.radius || circleRadius,
             0,
-            360
+            2 * Math.PI
         )
         ctx.fillStyle = options.fillStyle || 'black'
-        ctx.fill();
+        // ctx.fill();
+        ctx.stroke();
     },
 
     /**
@@ -104,6 +102,7 @@ export default {
         ctx.strokeStyle = "red";
         ctx.lineWidth = line_width;
         ctx.stroke();
+        ctx.closePath();
 
         // this.renderText(canvas, `GEN:${genValue} \\\ SCALED ${line_x}`);
     },
@@ -136,6 +135,11 @@ export default {
         ctx.stroke()
     },
 
+    /**
+     * @param {HTMLElement} canvas
+     * @param {Number|string} text
+     * @param {{}|{x: number, y: Number, fillStyle: string, font: string}} options
+     */
     renderText(canvas, text, options) {
         let ctx = canvas.getContext('2d');
 
@@ -150,6 +154,12 @@ export default {
         if (options && options["y"]) {
             y = valueHelpers.scaleValue(options["y"], [0, canvas.height]);
         }
+
+
+        // save existing context
+        const oldFillStyle = ctx.fillStyle;
+        const oldFont = ctx.font;
+
         if (options && options["font"]) {
             ctx.font = options["font"];
         }
@@ -159,6 +169,9 @@ export default {
 
         ctx.fillText(text, x, y);
 
+        // restore old context
+        ctx.fillStyle = oldFillStyle;
+        ctx.font = oldFont;
     },
 
     async clearCanvas(canvas) {

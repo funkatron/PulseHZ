@@ -59,7 +59,7 @@
     import {LoopatronArrangement} from "./src/LoopatronArrangement.js";
     import {LoopatronRenderer} from "./src/LoopatronRenderer.js";
     import {valueFunctions} from "./src/valueFunctions.js";
-    import canvasOutputFunctions from "./src/canvas/canvasOutputFunctions.js";
+    import canvasOutputFunctions from "./src/canvas/canvasRenderFunctions.js";
     import valueHelpers from "./src/valueHelpers.js";
     import {DEFAULT_STEP_INCREMENT_SINE} from "./src/consts.js";
 
@@ -176,17 +176,14 @@
          * @param {HTMLCanvasElement} t
          */
         (syncStep, v, t) => {
-            let scaledValue = valueHelpers.scaleValue(v, [0 - t.width, t.width]) * 0.01;
-            // translate to center
             // draw a dot that rotates around the center of the canvas
             const orbitRadius = t.width * 0.5;
-            const x = Math.cos(scaledValue) * orbitRadius + t.width * 0.5;
-            const y = Math.sin(scaledValue) * orbitRadius + t.height * 0.5;
-            // make "blink" effect
-            const blinkValue = Math.sin(scaledValue * 2);
-            const blinkScale = valueHelpers.scaleValue(blinkValue, [0, 1], [0.5, 1]);
+            // scale to radians
+            const scaledValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+            const x = Math.cos(scaledValue) * orbitRadius + (t.width * 0.5);
+            const y = Math.sin(scaledValue) * orbitRadius + (t.height * 0.5);
 
-            canvasOutputFunctions.renderCircle(t, v, {x, y, radius: 20, fillStyle: blinkScale ? 'red' : 'black'});
+            canvasOutputFunctions.renderCircle(t, v, {x, y, radius: 20});
         })
 
     const arrangement = new LoopatronArrangement([
