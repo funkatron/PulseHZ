@@ -29,30 +29,30 @@
 <body>
 
 <div class="loopatron-grid">
-    <div class="loopatron-renderer">
-        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
-                id="canvas1"
-                height="384"
-                width="384"></canvas>
-    </div>
+    <!--    <div class="loopatron-renderer">-->
+    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
+    <!--                id="canvas2"-->
+    <!--                height="512"-->
+    <!--                width="512"></canvas>-->
+    <!--    </div>-->
     <div class="loopatron-renderer">
         <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
                 id="canvas2"
-                height="384"
-                width="384"></canvas>
+                height="512"
+                width="512"></canvas>
     </div>
-    <div class="loopatron-renderer">
-        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
-                id="canvas3"
-                height="384"
-                width="384"></canvas>
-    </div>
-    <div class="loopatron-renderer">
-        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
-                id="canvas4"
-                height="384"
-                width="384"></canvas>
-    </div>
+    <!--    <div class="loopatron-renderer">-->
+    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
+    <!--                id="canvas3"-->
+    <!--                height="384"-->
+    <!--                width="384"></canvas>-->
+    <!--    </div>-->
+    <!--    <div class="loopatron-renderer">-->
+    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
+    <!--                id="canvas4"-->
+    <!--                height="384"-->
+    <!--                width="384"></canvas>-->
+    <!--    </div>-->
 </div>
 
 <script type="module">
@@ -61,7 +61,7 @@
     import {valueFunctions} from "./src/valueFunctions.js";
     import canvasOutputFunctions from "./src/canvas/canvasRenderFunctions.js";
     import valueHelpers from "./src/valueHelpers.js";
-    import {DEFAULT_STEP_INCREMENT_SINE} from "./src/consts.js";
+    import {DEFAULT_RANGE, DEFAULT_STEP_INCREMENT_SINE} from "./src/consts.js";
 
     const C64DISASM_EN = `.,ACB8 20 06 A9 JSR $A906       scan for next BASIC statement ([:] or [EOL])
 .,ACBB C8       INY             increment index to next byte
@@ -91,18 +91,24 @@
 
     const renderer1 = new LoopatronRenderer(
         valueFunctions.sine,
-        document.getElementById("canvas1"),
+        document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
          * @param {Number} v
          * @param {HTMLCanvasElement} t
          */
         (syncStep, v, t) => {
-            canvasOutputFunctions.renderCircle(t, v);
+            canvasOutputFunctions.renderCircle(t, v, {
+                radius: t.width / 4,
+                x: t.width / 2,
+                y: t.width / 2,
+                fill: true
+            });
 
             // scale the value to radians
-            let rotationValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+            let rotationValue = Math.floor(valueHelpers.scaleValue(v, [0, Math.PI * 2]));
             canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue * DEFAULT_STEP_INCREMENT_SINE});
+            // canvasOutputFunctions.renderXYAxes(t, );
         }
     );
 
@@ -122,7 +128,7 @@
 
     const renderer3 = new LoopatronRenderer(
         valueFunctions.sine,
-        document.getElementById("canvas3"),
+        document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
          * @param {Number} v
@@ -131,17 +137,15 @@
         (syncStep, v, t) => {
             // make 20 of these lines
             for (let i = 0; i < 20; i++) {
-                canvasOutputFunctions.renderRedVerticalLine(t, v * i/20)
-                canvasOutputFunctions.renderRedHorizontalLine(t, v * i/20 + t.height * 0.1)
+                canvasOutputFunctions.renderRedVerticalLine(t, v * i / 20)
+                canvasOutputFunctions.renderRedHorizontalLine(t, v * i / 20 + t.height * 0.1)
             }
-
-
         }
     );
 
     const renderer4 = new LoopatronRenderer(
         valueFunctions.sine,
-        document.getElementById("canvas4"),
+        document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
          * @param {Number} v
@@ -150,14 +154,16 @@
         (syncStep, v, t) => {
             canvasOutputFunctions.renderXYAxes(t, {rotation: v * DEFAULT_STEP_INCREMENT_SINE});
             canvasOutputFunctions.renderCircleLine(t, v);
-            canvasOutputFunctions.renderCircle(t, v);
+            canvasOutputFunctions.renderCircleLine(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
+            canvasOutputFunctions.renderCircle(t, v, {fill: true, stroke: true, fillStyle: `rgba(255, 255, 255, 0.5)`});
             canvasOutputFunctions.renderGreenCircles(t, v);
+            canvasOutputFunctions.renderGreenCircles(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
         }
     );
 
     const renderer5 = new LoopatronRenderer(
         valueFunctions.sine,
-        document.getElementById("canvas3"),
+        document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
          * @param {Number} v
@@ -168,10 +174,10 @@
             const lines = C64DISASM_EN.split("\n");
             const line = lines[Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))];
             canvasOutputFunctions.renderText(t, line, {
-                x: -24,
-                y: v,
-                font: '24px monospace',
-                fillStyle: 'black'
+                // x: 24,
+                // y: t.height - 24,
+                font: '12px monospace',
+                fillStyle: 'white'
             });
         }
     );

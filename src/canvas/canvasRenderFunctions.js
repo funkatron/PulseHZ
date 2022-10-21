@@ -50,10 +50,10 @@ export default {
         // rotate the canvas if needed
         if (rotation !== 0) {
             // translate to rotate around the center of the canvas
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.rotate(rotation);
+            // ctx.translate(canvas.width / 2, canvas.height / 2);
+            // ctx.rotate(rotation);
             // translate back to the original position
-            ctx.translate(-(canvas.width / 2), -(canvas.height / 2));
+            // ctx.translate(-(canvas.width / 2), -(canvas.height / 2));
         }
 
         // draw the X axis line
@@ -69,15 +69,15 @@ export default {
         ctx.stroke();
 
         // draw dashes on the X axis
-        const XY_NUM_DASHES = 32;
-        for (let i = 1; i <= x * XY_NUM_DASHES; i++) {
+        const XY_NUM_DASHES = 127;
+        for (let i = 1; i <= XY_NUM_DASHES; i++) {
             const dashX = valueHelpers.scaleToLogValue(canvas.width / XY_NUM_DASHES * i, [0, canvas.width]);
             ctx.beginPath();
-            ctx.moveTo(dashX, y - 5);
-            ctx.lineTo(dashX, y - 3);
+            ctx.moveTo(dashX, y - 12);
+            ctx.lineTo(dashX, y - 10);
 
-            ctx.moveTo(dashX, y + 3);
-            ctx.lineTo(dashX, y + 5);
+            ctx.moveTo(dashX, y + 10);
+            ctx.lineTo(dashX, y + 12);
 
             ctx.stroke();
         }
@@ -254,15 +254,13 @@ export default {
         let lineWidth = valueHelpers.scaleToLogValue(genValue, [1, lineX / 2])
         lineX = lineX - lineWidth / 2;
 
-        console.log(`rendering red vertical line at ${genValue} line_x: ${lineX}, line_width: ${lineWidth}`);
-
         // store previous ctx options
         const previousStrokeStyle = ctx.strokeStyle;
         const previousLineWidth = ctx.lineWidth;
         const previousFillStyle = ctx.fillStyle;
 
         ctx.strokeStyle = "rgba(0, 0, 0, 1)";
-        ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
         ctx.fillRect(lineX, 0, lineWidth, canvas.height);
         ctx.strokeRect(lineX, 0, lineWidth, canvas.height);
 
@@ -284,8 +282,6 @@ export default {
         let lineWidth = valueHelpers.scaleToLogValue(genValue, [1, lineY / 2])
         lineY = lineY - lineWidth / 2;
 
-        console.log(`rendering red vertical line at ${genValue} line_x: ${lineY}, line_width: ${lineWidth}`);
-
         // store previous ctx options
         const previousStrokeStyle = ctx.strokeStyle;
         const previousLineWidth = ctx.lineWidth;
@@ -293,7 +289,7 @@ export default {
 
         // get color based on gen value
         ctx.strokeStyle = "rgba(0, 0, 0, 1)";
-        ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
         ctx.fillRect(0, lineY, canvas.width, lineWidth);
         ctx.strokeRect(0, lineY, canvas.width, lineWidth);
 
@@ -309,12 +305,22 @@ export default {
      */
     renderGreenCircles(canvas, genValue) {
         let ctx = canvas.getContext('2d')
+
+        // store previous ctx options
+        const previousStrokeStyle = ctx.strokeStyle;
+        const previousLineWidth = ctx.lineWidth;
+
         let dot_val = valueHelpers.scaleValue(genValue, [0, canvas.width])
         let radius_val = valueHelpers.scaleValue(genValue, [0, canvas.width / 2])
         ctx.beginPath()
         ctx.arc(0 + dot_val, 0 + dot_val, Math.abs(radius_val), 0, 2 * Math.PI)
         ctx.strokeStyle = "green";
-        ctx.stroke()
+        ctx.lineWidth = 8;
+        ctx.stroke();
+
+        // restore previous ctx options
+        ctx.strokeStyle = previousStrokeStyle;
+        ctx.lineWidth = previousLineWidth;
     },
 
     /**
@@ -322,13 +328,23 @@ export default {
      * @param {Number} genValue
      */
     renderCircleLine(canvas, genValue) {
-        let ctx = document.getElementById('canvas4').getContext('2d')
+        let ctx = canvas.getContext('2d')
+
+        // store previous ctx options
+        const previousStrokeStyle = ctx.strokeStyle;
+        const previousLineWidth = ctx.lineWidth;
+
         ctx.beginPath()
         genValue = valueHelpers.scaleValue(genValue, [0 - (canvas.width / 2), canvas.width / 2]);
         // this.renderText(canvas, `GEN:${genValue}`);
         ctx.arc(canvas.width / 2 + genValue, canvas.height / 2 - genValue, Math.abs(genValue), 0, 20)
         ctx.strokeStyle = "black";
+        ctx.lineWidth = 8;
         ctx.stroke()
+
+        // restore previous ctx options
+        ctx.strokeStyle = previousStrokeStyle;
+        ctx.lineWidth = previousLineWidth;
     },
 
     /**
