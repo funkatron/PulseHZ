@@ -115,6 +115,7 @@
          * @param {HTMLCanvasElement} t
          */
         (syncStep, v, t) => {
+            canvasOutputFunctions.renderCircleGrid(t, v);
             canvasOutputFunctions.renderXYAxes(t, {x: v});
         }
     );
@@ -127,7 +128,15 @@
          * @param {Number} v
          * @param {HTMLCanvasElement} t
          */
-        (syncStep, v, t) => canvasOutputFunctions.renderRedVerticalLine(t, v)
+        (syncStep, v, t) => {
+            // make 20 of these lines
+            for (let i = 0; i < 20; i++) {
+                canvasOutputFunctions.renderRedVerticalLine(t, v * i/20)
+                canvasOutputFunctions.renderRedHorizontalLine(t, v * i/20 + t.height * 0.1)
+            }
+
+
+        }
     );
 
     const renderer4 = new LoopatronRenderer(
@@ -178,25 +187,51 @@
         (syncStep, v, t) => {
             // draw a dot that rotates around the center of the canvas
             let orbitRadius = t.width / 2;
+            let dotRadius = t.width / 20;
 
             // scale to radians
             let radiansValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
             let x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
             let y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
-            let radius = 20;
             canvasOutputFunctions.renderCircle(t,
                 v,
                 {
                     x: x,
                     y: y,
-                    radius: radius,
+                    radius: dotRadius,
                 }
             );
-            // canvasOutputFunctions.renderRedVerticalLine(t, x + radius);
+
+            // draw a line for the path of the dot
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: t.width / 2,
+                    y: t.height / 2,
+                    radius: orbitRadius,
+                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                    lineWidth: dotRadius / 2,
+                    fill: false,
+                    stroke: true,
+                }
+            );
+
+            // draw a line from the bottom of the canvas to the center of the dot
+            canvasOutputFunctions.renderLine(t,
+                v,
+                {
+                    x2: x,
+                    y2: y,
+                    x1: t.width / 2,
+                    y1: t.height + dotRadius,
+                    lineWidth: dotRadius / 2,
+                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
+                }
+            );
 
 
-            // draw a line from the side of the canvas to the dot
             orbitRadius = t.width / 3;
+            dotRadius = t.width / 30;
             x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
             y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
             canvasOutputFunctions.renderCircle(t,
@@ -204,11 +239,36 @@
                 {
                     x: x,
                     y: y,
-                    radius: 10
+                    radius: dotRadius
+                }
+            );
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: t.width / 2,
+                    y: t.height / 2,
+                    radius: orbitRadius,
+                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                    lineWidth: dotRadius / 2,
+                    fill: false,
+                    stroke: true,
+                }
+            );
+            canvasOutputFunctions.renderLine(t,
+                v,
+                {
+                    x2: x,
+                    y2: y,
+                    x1: t.width / 2,
+                    y1: t.height + dotRadius,
+                    lineWidth: dotRadius / 3,
+                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
                 }
             );
 
-            orbitRadius = t.width / 4;
+
+            orbitRadius = t.width / 5;
+            dotRadius = t.width / 40;
             x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
             y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
             canvasOutputFunctions.renderCircle(t,
@@ -216,9 +276,34 @@
                 {
                     x: x,
                     y: y,
-                    radius: 5
+                    radius: dotRadius
                 }
             );
+            canvasOutputFunctions.renderCircle(t,
+                v,
+                {
+                    x: t.width / 2,
+                    y: t.height / 2,
+                    radius: orbitRadius,
+                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                    lineWidth: dotRadius / 2,
+                    fill: false,
+                    stroke: true,
+                }
+            );
+
+            canvasOutputFunctions.renderLine(t,
+                v,
+                {
+                    x2: x,
+                    y2: y,
+                    x1: t.width / 2,
+                    y1: t.height + dotRadius,
+                    lineWidth: dotRadius / 4,
+                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
+                }
+            );
+
 
         })
 

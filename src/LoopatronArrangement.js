@@ -1,4 +1,4 @@
-import {DEFAULT_FPS} from "./consts.js";
+import {DEFAULT_FPS, LOOPATRON_DEBUG} from "./consts.js";
 import canvasOutputFunctions from "./canvas/canvasRenderFunctions.js";
 
 /**
@@ -63,7 +63,6 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
                     return canvasOutputFunctions.clearCanvas(r.renderTarget);
                 });
                 await Promise.all(clearPromises);
-                console.debug(`S[${this.syncStep}] cleared ${clearPromises.length} canvasses`);
 
                 // render
                 let renderPromises = this.renderers.map(r => {
@@ -71,8 +70,6 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
                     return r.render(this.syncStep);
                 });
                 await Promise.all(renderPromises);
-                console.debug(`S[${this.syncStep}] rendered ${renderPromises.length} renderers`);
-
                 this.syncStep++;
 
             }, 1000 / this.fps);
