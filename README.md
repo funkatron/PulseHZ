@@ -6,7 +6,28 @@ LT5K is a modular library for building syncronized, loop-based patterns for anim
 
 # Demos
 
-- [Kitchen Sink Canvas Demo](./examples/demo-kitchensink.html)
+To view demos, you'll want to run a web server. I use [live-server](https://www.npmjs.com/package/live-server) for this.  If you do not already have it or a similar program installed, do the following:
+
+```bash
+npm install -g live-server
+```
+
+Then, from the root of the LT5K, run:
+
+```bash
+live-server ./
+```
+
+`live-server` will probably say something like:
+
+```bash
+Serving "./" at http://127.0.0.1:8080
+Ready for changes
+```
+
+and then open a browser window to that URL.  You can then navigate to the `examples` directory and click on the demo you want to see.
+
+- [Kitchen Sink Canvas Demo](http://127.0.0.1:8080/examples/demo-kitchensink.html)
 
 # Structure
 
