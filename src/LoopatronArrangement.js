@@ -7,9 +7,13 @@ import canvasOutputFunctions from "./canvas/canvasRenderFunctions.js";
  * @property {Number} fps
  * @property {Array[LoopatronRenderer]} renderers
  * @property {function(): void} play
+ * @property {function(): void} pause
  * @property {function(): void} stop
  * @property {function(LoopatronRenderer): void} addRenderer
  * @property {function(LoopatronRenderer): void} removeRenderer
+ * @property {function(): void} stepForward
+ * @property {function(): void} stepBackward
+ * @property {function(): void} resume
  * @constructor
  */
 
@@ -53,14 +57,20 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
             this.renderers = this.renderers.filter(r => r !== renderer)
         },
 
-        play: function () {
-            this.syncStep = 0;
+        play: function (syncStep = 0) {
+            this.syncStep = syncStep;
 
             this._mainLoopInterval = setInterval(async () => {
 
                 // clear outputs
                 let clearPromises = this.renderers.map(r => {
-                    return canvasOutputFunctions.clearCanvas(r.renderTarget);
+                    if (r.output instanceof HTMLCanvasElement) {
+                        // if this is an HTMLCanvasElement, clear it
+                        return canvasOutputFunctions.clearCanvas(r.renderTarget);
+                    } else if (r.output instanceof HTMLElement) {
+                        // if this is an HTMLElement, clear it
+                        return r.output.innerHTML = "";
+                    }
                 });
                 await Promise.all(clearPromises);
 
@@ -74,6 +84,29 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
 
             }, 1000 / this.fps);
         },
+
+        pause: function () {
+            clearInterval(this._mainLoopInterval);
+        },
+
+        resume: function () {
+            this.play(this.syncStep);
+        },
+
+        stepForward: function () {
+            this.renderers.map(r => {
+                r.render(this.syncStep);
+            });
+            this.syncStep++;
+        },
+
+        stepBackward: function () {
+            this.syncStep--;
+            this.renderers.map(r => {
+                r.render(this.syncStep);
+            });
+        },
+
         stop: function () {
             clearInterval(this._mainLoopInterval);
             this.syncStep = 0;

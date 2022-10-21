@@ -17,16 +17,77 @@
              See https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_usage
              */
             border: 1px solid black;
-            margin: 0;
+            margin: 1rem;
             padding: 0;
         }
 
         .loopatron-renderer__output__canvas {
             background-color: transparent;
         }
+
+        #controls {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            margin: 1rem;
+            padding: 0;
+        }
+
+        #sync-step {
+            display: inline-block;
+            font-family: "DejaVu Sans Mono", monospace;
+            font-size: 1.3rem;
+        }
+
+        #step-forward {
+            /* flip the button */
+            transform: matrix(-1, 0, 0, 1, 0, 0);
+            /* rotate 180 degrees */
+            /*transform: rotate(180deg);*/
+        }
     </style>
 </head>
 <body>
+
+<div id="controls">
+    <!-- an svg arrow to step backwards -->
+    <div id="step-backward">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- the current syncstep value -->
+    <div id="sync-step">
+    </div>
+
+    <!-- an svg pause button -->
+    <div id="pause">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- an svg play button -->
+    <div id="play">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- an svg arrow to skip forward -->
+    <div id="step-forward">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+
+</div>
 
 <div class="loopatron-grid">
     <!--    <div class="loopatron-renderer">-->
@@ -56,12 +117,12 @@
 </div>
 
 <script type="module">
-    import {LoopatronArrangement} from "./src/LoopatronArrangement.js";
-    import {LoopatronRenderer} from "./src/LoopatronRenderer.js";
-    import {valueFunctions} from "./src/valueFunctions.js";
-    import canvasOutputFunctions from "./src/canvas/canvasRenderFunctions.js";
-    import valueHelpers from "./src/valueHelpers.js";
-    import {DEFAULT_RANGE, DEFAULT_STEP_INCREMENT_SINE} from "./src/consts.js";
+    import {LoopatronArrangement} from "../src/LoopatronArrangement.js";
+    import {LoopatronRenderer} from "../src/LoopatronRenderer.js";
+    import {valueFunctions} from "../src/valueFunctions.js";
+    import canvasOutputFunctions from "../src/canvas/canvasRenderFunctions.js";
+    import valueHelpers from "../src/valueHelpers.js";
+    import {DEFAULT_RANGE, DEFAULT_STEP_INCREMENT_SINE} from "../src/consts.js";
 
     const C64DISASM_EN = `.,ACB8 20 06 A9 JSR $A906       scan for next BASIC statement ([:] or [EOL])
 .,ACBB C8       INY             increment index to next byte
@@ -90,12 +151,12 @@
 .,ACE5 10 03    BPL $ACEA       branch if INPUT or GET`; // end of C64DISASM_EN
 
     const renderer1 = new LoopatronRenderer(
-        valueFunctions.sine,
+        valueFunctions.ramp,
         document.getElementById("canvas2"),
         /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
+         * @param {Number} syncStep the current syncStep value
+         * @param {Number} v the value passed to the renderer
+         * @param {HTMLCanvasElement} t the target element. In this case we are expecting an HTMLCanvasElement
          */
         (syncStep, v, t) => {
             canvasOutputFunctions.renderCircle(t, v, {
@@ -106,14 +167,18 @@
             });
 
             // scale the value to radians
-            let rotationValue = Math.floor(valueHelpers.scaleValue(v, [0, Math.PI * 2]));
-            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue * DEFAULT_STEP_INCREMENT_SINE});
+            let rotationValue = Math.log2(valueHelpers.scaleValue(v, [0, Math.PI * 2]));
+            // change color based on v and syncStep
+            let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [0, 360]))}, 100%, 50%)`;
+            // set the stroke color
+
+            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue, lineWidth: 200, strokeStyle: color});
             // canvasOutputFunctions.renderXYAxes(t, );
         }
     );
 
     const renderer2 = new LoopatronRenderer(
-        valueFunctions.ramp,
+        valueFunctions.sine,
         document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
@@ -122,7 +187,9 @@
          */
         (syncStep, v, t) => {
             canvasOutputFunctions.renderCircleGrid(t, v);
-            canvasOutputFunctions.renderXYAxes(t, {x: v});
+            // set color to values of pink and blue based on v
+            let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [198, 294]))}, 72%, 56%, 0.5)`;
+            canvasOutputFunctions.renderXYAxes(t, {x: v, strokeStyle: color, lineWidth: t.height / 2});
         }
     );
 
@@ -152,12 +219,18 @@
          * @param {HTMLCanvasElement} t
          */
         (syncStep, v, t) => {
-            canvasOutputFunctions.renderXYAxes(t, {rotation: v * DEFAULT_STEP_INCREMENT_SINE});
+            // scale rotation value to radians
+            let rotationValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue});
             canvasOutputFunctions.renderCircleLine(t, v);
             canvasOutputFunctions.renderCircleLine(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
-            canvasOutputFunctions.renderCircle(t, v, {fill: true, stroke: true, fillStyle: `rgba(255, 255, 255, 0.5)`});
-            canvasOutputFunctions.renderGreenCircles(t, v);
-            canvasOutputFunctions.renderGreenCircles(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
+            canvasOutputFunctions.renderCircle(t, v, {
+                fill: true,
+                stroke: true,
+                fillStyle: `rgba(255, 255, 255, 0.5)`
+            });
+            canvasOutputFunctions.renderCornerZoomCircles(t, v);
+            canvasOutputFunctions.renderCornerZoomCircles(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
         }
     );
 
@@ -321,7 +394,65 @@
         renderer5,
         renderer6,
     ]);
-    arrangement.play();
+    // execute when dom is ready
+    document.addEventListener("DOMContentLoaded", function (event) {
+        // kill any form submissions
+        document.querySelectorAll('form').forEach((form) => {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+            });
+        });
+
+        // pause handler
+        document.getElementById("pause").addEventListener("click", (e) => {
+            e.stopPropagation();
+            arrangement.pause();
+            return false;
+        });
+
+        // play/resume handler
+        document.getElementById("play").addEventListener("click", (e) => {
+            e.stopPropagation();
+            arrangement.resume();
+            return false;
+        });
+
+        // step-backward handler
+        document.getElementById("step-backward").addEventListener("click", (e) => {
+            e.stopPropagation();
+            arrangement.stepBackward();
+        });
+
+        // step-forward handler
+        document.getElementById("step-forward").addEventListener("click", (e) => {
+            e.stopPropagation();
+            arrangement.stepForward();
+        });
+
+        // add a renderer for the syncstep HTML
+        const syncStepRenderer = new LoopatronRenderer(
+            valueFunctions.ramp,
+            document.getElementById("sync-step"),
+            /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLElement} t
+             */
+            (syncStep, v, t) => {
+                // pad syncstep with 6 leading zeroes
+                t.innerHTML = `${syncStep.toString().padStart(6, '0')}`;
+            }
+        );
+        arrangement.addRenderer(syncStepRenderer);
+
+        arrangement.play();
+
+
+    });
+
+
 </script>
+
+
 </body>
 </html>

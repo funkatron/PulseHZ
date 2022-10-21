@@ -22,11 +22,6 @@ export default {
         let bleedY = 0;
 
         if (options && options["rotation"]) {
-            // if we are rotating, we should draw "wider" so that the axes don't get cut off
-            canvasXRange = [0 - canvas.width, canvas.width * 3];
-            canvasYRange = [0 - canvas.height, canvas.height * 3];
-            bleedX = canvas.width;
-            bleedY = canvas.height;
             rotation = options["rotation"];
         }
 
@@ -47,40 +42,26 @@ export default {
         ctx.fillStyle = options.fillStyle || "black";
         ctx.lineWidth = options.lineWidth || 1;
 
-        // rotate the canvas if needed
-        if (rotation !== 0) {
-            // translate to rotate around the center of the canvas
-            // ctx.translate(canvas.width / 2, canvas.height / 2);
-            // ctx.rotate(rotation);
-            // translate back to the original position
-            // ctx.translate(-(canvas.width / 2), -(canvas.height / 2));
-        }
-
-        // draw the X axis line
+        // draw an x axis and a y axis in the middle of the canvas, rotated if necessary
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
         ctx.beginPath();
-        ctx.moveTo(0 - bleedX, y);
-        ctx.lineTo(canvas.width + bleedX, y);
-        ctx.stroke();
-
-        // draw the Y axis line
-        ctx.beginPath();
-        ctx.moveTo(x, 0 - bleedY);
-        ctx.lineTo(x, canvas.height + bleedY);
-        ctx.stroke();
+        ctx.moveTo(-canvas.width - bleedX, 0);
+        ctx.lineTo(canvas.width + bleedX, 0);
+        ctx.moveTo(0, -canvas.height - bleedY);
+        ctx.lineTo(0, canvas.height + bleedY);
 
         // draw dashes on the X axis
-        const XY_NUM_DASHES = 127;
-        for (let i = 1; i <= XY_NUM_DASHES; i++) {
-            const dashX = valueHelpers.scaleToLogValue(canvas.width / XY_NUM_DASHES * i, [0, canvas.width]);
-            ctx.beginPath();
-            ctx.moveTo(dashX, y - 12);
-            ctx.lineTo(dashX, y - 10);
+        const NUM_DASHES = 10;
+        for (let i = -canvas.width - bleedX; i < canvas.width + bleedX; i += NUM_DASHES) {
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, 5);
 
-            ctx.moveTo(dashX, y + 10);
-            ctx.lineTo(dashX, y + 12);
-
-            ctx.stroke();
         }
+
+        ctx.stroke();
+        ctx.restore();
 
         // restore the previous ctx options
         ctx.fillStyle = prevFillStyle;
@@ -303,7 +284,7 @@ export default {
      * @param {HTMLCanvasElement} canvas
      * @param {Number} genValue
      */
-    renderGreenCircles(canvas, genValue) {
+    renderCornerZoomCircles(canvas, genValue) {
         let ctx = canvas.getContext('2d')
 
         // store previous ctx options
@@ -313,8 +294,11 @@ export default {
         let dot_val = valueHelpers.scaleValue(genValue, [0, canvas.width])
         let radius_val = valueHelpers.scaleValue(genValue, [0, canvas.width / 2])
         ctx.beginPath()
-        ctx.arc(0 + dot_val, 0 + dot_val, Math.abs(radius_val), 0, 2 * Math.PI)
-        ctx.strokeStyle = "green";
+        ctx.arc(dot_val, dot_val, Math.abs(radius_val), 0, 2 * Math.PI)
+
+        // a purple circle
+        ctx.strokeStyle = "rgb(114,22,194)";
+
         ctx.lineWidth = 8;
         ctx.stroke();
 
