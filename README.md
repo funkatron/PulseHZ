@@ -4,6 +4,8 @@
 
 LT5K is a modular library for building syncronized, loop-based patterns for animation and sound generation in JavaScript.
 
+![README-demo](./README-demo.gif)
+
 # Demos
 
 To view demos, you'll want to run a web server. I use [live-server](https://www.npmjs.com/package/live-server) for this.  If you do not already have it or a similar program installed, do the following:
