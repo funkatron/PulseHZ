@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Loopatron Demos/Tests</title>
+    <title>Loopatron Demos/Tests: Kitchen Sink Canvas Demo</title>
     <style>
         /** @TODO move to external stylesheet - EF 2022-10-19 */
         .loopatron-grid {
@@ -37,6 +37,8 @@
             display: inline-block;
             font-family: "DejaVu Sans Mono", monospace;
             font-size: 1.3rem;
+            user-select: text;
+
         }
 
         #step-forward {
@@ -50,6 +52,10 @@
 <body>
 
 <div id="controls">
+    <!-- the current syncstep value -->
+    <div id="sync-step">
+    </div>
+
     <!-- an svg arrow to step backwards -->
     <div id="step-backward">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
@@ -58,8 +64,12 @@
         </svg>
     </div>
 
-    <!-- the current syncstep value -->
-    <div id="sync-step">
+    <!-- and svg square to stop -->
+    <div id="stop">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h12v12H6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
     </div>
 
     <!-- an svg pause button -->
@@ -90,30 +100,12 @@
 </div>
 
 <div class="loopatron-grid">
-    <!--    <div class="loopatron-renderer">-->
-    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
-    <!--                id="canvas2"-->
-    <!--                height="512"-->
-    <!--                width="512"></canvas>-->
-    <!--    </div>-->
     <div class="loopatron-renderer">
         <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
                 id="canvas2"
                 height="512"
-                width="512"></canvas>
+                width="1024"></canvas>
     </div>
-    <!--    <div class="loopatron-renderer">-->
-    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
-    <!--                id="canvas3"-->
-    <!--                height="384"-->
-    <!--                width="384"></canvas>-->
-    <!--    </div>-->
-    <!--    <div class="loopatron-renderer">-->
-    <!--        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"-->
-    <!--                id="canvas4"-->
-    <!--                height="384"-->
-    <!--                width="384"></canvas>-->
-    <!--    </div>-->
 </div>
 
 <script type="module">
@@ -235,7 +227,7 @@
     );
 
     const renderer5 = new LoopatronRenderer(
-        valueFunctions.sine,
+        valueFunctions.ramp,
         document.getElementById("canvas2"),
         /**
          * @param {Number} syncStep
@@ -245,12 +237,19 @@
         (syncStep, v, t) => {
             // split this string into lines
             const lines = C64DISASM_EN.split("\n");
-            const line = lines[Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))];
+            const lineIdx = Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))
+            // get random val from lines
+            const randomIdx = Math.floor(Math.random() * lines.length);
+            const fontEm = randomIdx % 2 === 0 ? 1 : 3;
+            const line = lines[randomIdx];
+            const yVal = valueHelpers.scaleValue(lineIdx, DEFAULT_RANGE, [0, lines.length - 1])
+
             canvasOutputFunctions.renderText(t, line, {
-                // x: 24,
-                // y: t.height - 24,
-                font: '12px monospace',
-                fillStyle: 'white'
+                x: 0,
+                y: yVal,
+                font: `normal ${fontEm}em "DejaVu Sans Mono", "Lucida Console", monospace`,
+                fillStyle: 'rgba(255, 255, 255, 0.5)',
+                strokeStyle: 'rgba(0, 0 , 0, 1)'
             });
         }
     );
@@ -394,6 +393,7 @@
         renderer5,
         renderer6,
     ]);
+
     // execute when dom is ready
     document.addEventListener("DOMContentLoaded", function (event) {
         // kill any form submissions
@@ -407,14 +407,18 @@
         document.getElementById("pause").addEventListener("click", (e) => {
             e.stopPropagation();
             arrangement.pause();
-            return false;
         });
 
         // play/resume handler
         document.getElementById("play").addEventListener("click", (e) => {
             e.stopPropagation();
             arrangement.resume();
-            return false;
+        });
+
+        // stop handler
+        document.getElementById("stop").addEventListener("click", (e) => {
+            e.stopPropagation();
+            arrangement.stop();
         });
 
         // step-backward handler
@@ -440,7 +444,7 @@
              */
             (syncStep, v, t) => {
                 // pad syncstep with 6 leading zeroes
-                t.innerHTML = `${syncStep.toString().padStart(6, '0')}`;
+                t.innerHTML = `SS:${syncStep.toString().padStart(6, '0')}`;
             }
         );
         arrangement.addRenderer(syncStepRenderer);

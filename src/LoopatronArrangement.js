@@ -58,7 +58,7 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
         },
 
         play: function (syncStep = 0) {
-            this.syncStep = syncStep;
+            this.syncStep = Math.abs(syncStep);
 
             this._mainLoopInterval = setInterval(async () => {
 
@@ -101,15 +101,18 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
         },
 
         stepBackward: function () {
-            this.syncStep--;
-            this.renderers.map(r => {
-                r.render(this.syncStep);
-            });
+            if (this.syncStep > 0) {
+                this.syncStep--;
+                this.renderers.map(r => {
+                    r.render(this.syncStep);
+                });
+            }
         },
 
         stop: function () {
             clearInterval(this._mainLoopInterval);
-            this.syncStep = 0;
+            this.syncStep = 1;
+            this.stepBackward();
         }
     }
 }

@@ -1,6 +1,3 @@
-import {LOOPATRON_DEBUG} from "./consts.js";
-import canvasRenderFunctions from "./canvas/canvasRenderFunctions.js";
-
 /**
  *
  * @property {function(Number): Number} valueFunction
@@ -51,9 +48,6 @@ let LoopatronRenderer = function (valueFunction, renderTarget, renderFunction) {
         async render(syncStep = 0) {
             let value = this.valueFunction(syncStep);
             this.renderFunction(syncStep, value, this.renderTarget);
-            // if (LOOPATRON_DEBUG === true) {
-            //     canvasRenderFunctions.renderText(this.renderTarget, `S[${syncStep}] == ${value}`, {});
-            // }
         },
 
         /**

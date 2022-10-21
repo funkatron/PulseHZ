@@ -334,15 +334,16 @@ export default {
     /**
      * @param {HTMLElement} canvas
      * @param {Number|string} text
-     * @param {{}|{x: number, y: Number, fillStyle: string, font: string}} options
+     * @param {{}|{x: number, y: Number, fillStyle: string, font: string, strokeStyle: string}} options
      */
     renderText(canvas, text, options) {
         let ctx = canvas.getContext('2d');
 
         let x = 5
         let y = canvas.height - 17;
-        let font = "12px Deja Vu Sans Mono";
-        let fillStyle = "black";
+        let font = options.font || "12px Deja Vu Sans Mono";
+        let fillStyle = options.fillStyle || "black";
+        let strokeStyle = options.strokeStyle || "black";
 
         if (options && options["x"]) {
             x = valueHelpers.scaleValue(options["x"], [0, canvas.width]);
@@ -351,22 +352,23 @@ export default {
             y = valueHelpers.scaleValue(options["y"], [0, canvas.height]);
         }
 
-
         // save existing context
         const oldFillStyle = ctx.fillStyle;
+        const oldStrokeStyle = ctx.strokeStyle;
         const oldFont = ctx.font;
 
-        if (options && options["font"]) {
-            ctx.font = options["font"];
-        }
-        if (options && options["fillStyle"]) {
-            ctx.fillStyle = options["fillStyle"];
-        }
+        ctx.font = font;
+        ctx.fillStyle = fillStyle;
+        ctx.strokeStyle = strokeStyle;
 
         ctx.fillText(text, x, y);
+        if (strokeStyle) {
+            ctx.strokeText(text, x, y);
+        }
 
         // restore old context
         ctx.fillStyle = oldFillStyle;
+        ctx.strokeStyle = oldStrokeStyle;
         ctx.font = oldFont;
     },
 
