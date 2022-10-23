@@ -47,8 +47,6 @@
              * @param {number} value the value returned by the value function
              */
             (syncStep, value, target) => {
-                const ctx = target.getContext('2d');
-
                 const x = target.width / 2;  // center the dot horizontally
 
                 canvasRenderFunctions.renderCircle(target, value, {x: x, radius: 10});
