@@ -1,0 +1,43 @@
+.loopatron-grid {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.loopatron-renderer {
+}
+
+.loopatron-renderer__output {
+    /* note: don't set height or width here. We want to set <canvas> size directly
+     See https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_usage
+     */
+    border: 1px solid black;
+    margin: 1rem;
+    padding: 0;
+}
+
+.loopatron-renderer__output__canvas {
+    background-color: transparent;
+}
+
+#loopatron-arrangement-controls {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin: 1rem;
+    padding: 0;
+}
+
+#sync-step {
+    display: inline-block;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 1.3rem;
+    user-select: text;
+
+}
+
+#step-forward {
+    /* flip the button */
+    transform: matrix(-1, 0, 0, 1, 0, 0);
+    /* rotate 180 degrees */
+    /*transform: rotate(180deg);*/
+}

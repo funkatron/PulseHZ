@@ -1,5 +1,7 @@
 import {DEFAULT_FPS, LOOPATRON_DEBUG} from "./consts.js";
 import canvasOutputFunctions from "./canvas/canvasRenderFunctions.js";
+import {LoopatronRenderer} from "./LoopatronRenderer.js";
+import {valueFunctions} from "./valueFunctions.js";
 
 /**
  * @typedef {Object} LoopatronArrangement
@@ -14,6 +16,7 @@ import canvasOutputFunctions from "./canvas/canvasRenderFunctions.js";
  * @property {function(): void} stepForward
  * @property {function(): void} stepBackward
  * @property {function(): void} resume
+ * @property {function(HTMLElement): void} addControls
  * @constructor
  */
 
@@ -45,6 +48,8 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
 
         _mainLoopInterval: null,
 
+        isPlaying: false,
+
         /**
          * @returns {void}
          * @param {LoopatronRenderer} renderer
@@ -63,6 +68,8 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
 
         play: function (syncStep = 0) {
             this.syncStep = Math.abs(syncStep);
+
+            this.isPlaying = true;
 
             this._mainLoopInterval = setInterval(async () => {
 
@@ -97,13 +104,20 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
 
         pause: function () {
             clearInterval(this._mainLoopInterval);
+            this.isPlaying = false;
         },
 
         resume: function () {
-            this.play(this.syncStep);
+            if (!this.isPlaying) {
+                this.play(this.syncStep);
+            }
         },
 
         stepForward: function () {
+            if (this.isPlaying) {
+                this.pause();
+            }
+
             this.renderers.map(r => {
                 r.render(this.syncStep);
             });
@@ -123,6 +137,123 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
             clearInterval(this._mainLoopInterval);
             this.syncStep = 1;
             this.stepBackward();
+            this.isPlaying = false;
+        },
+
+        /**
+         * @returns {void}
+         * @param {HTMLElement} controlsRootElement
+         */
+        addControls: function (controlsRootElement) {
+            controlsRootElement.innerHTML = `
+    <!-- the current syncstep value -->
+    <div id="sync-step">
+    </div>
+
+    <!-- an svg arrow to step backwards -->
+    <div id="step-backward">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- and svg square to stop -->
+    <div id="stop">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h12v12H6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- an svg pause button -->
+    <div id="pause">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- an svg play button -->
+    <div id="play">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+
+    <!-- an svg arrow to skip forward -->
+    <div id="step-forward">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            <path d="M0 0h24v24H0z" fill="none"/>
+        </svg>
+    </div>
+    
+    <!-- a chechbox to toggle clearBeforeEveryFrame -->
+    <div id="clear-before-every-frame">
+        
+        <label for="clear-before-every-frame-checkbox"><input type="checkbox" id="clear-before-every-frame-checkbox" checked> Clear before every frame</label>
+    </div>
+    `;
+
+            // add handler for clear-before-every-frame-checkbox
+            if (!!this.clearBeforeEveryFrame) {  // initialize the checkbox first
+                document.getElementById("clear-before-every-frame-checkbox").setAttribute("checked", "checked");
+            } else {
+                document.getElementById("clear-before-every-frame-checkbox").removeAttribute("checked");
+            }
+
+            controlsRootElement.querySelector("#clear-before-every-frame-checkbox").addEventListener("change", (e) => {
+                e.stopPropagation();
+                this.clearBeforeEveryFrame = e.target.checked;
+            });
+
+            // play/resume handler
+            controlsRootElement.querySelector(`#play`).addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.resume();
+            });
+
+            // stop handler
+            controlsRootElement.querySelector("#stop").addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.stop();
+            });
+
+            // pausee handler
+            controlsRootElement.querySelector("#pause").addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.pause();
+            });
+
+            // step-backward handler
+            controlsRootElement.querySelector("#step-backward").addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.stepBackward();
+            });
+
+            // step-forward handler
+            controlsRootElement.querySelector("#step-forward").addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.stepForward();
+            });
+
+            // add a renderer for the syncstep HTML
+            const syncStepRenderer = new LoopatronRenderer(
+                valueFunctions.ramp,
+                document.getElementById("sync-step"),
+                /**
+                 * @param {Number} syncStep
+                 * @param {Number} v
+                 * @param {HTMLElement} t
+                 */
+                (syncStep, v, t) => {
+                    // pad syncstep with 6 leading zeroes
+                    t.innerHTML = `SS:${syncStep.toString().padStart(6, '0')}`;
+                }
+            );
+            this.addRenderer(syncStepRenderer);
         }
     }
 }

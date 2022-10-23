@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <title>Simple Sin Wave Demo</title>
+    <link rel="stylesheet" href="demos.css">
+</head>
+<body>
+
+<!-- @TODO make this a webcomponent to share between demos -->
+<div id="loopatron-arrangement-controls">
+</div>
+
+<div class="loopatron-grid">
+    <div class="loopatron-renderer">
+        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+                id="canvas-sine-wave-demo"
+                height="768"
+                width="384"></canvas>
+    </div>
+</div>
+
+<script type="module">
+    import {LoopatronArrangement} from "../src/LoopatronArrangement.js";
+    import {LoopatronRenderer} from "../src/LoopatronRenderer.js";
+    import {valueFunctions} from "../src/valueFunctions.js";
+    import canvasRenderFunctions from "../src/canvas/canvasRenderFunctions.js";
+
+    const demoRenderers = [
+        new LoopatronRenderer(
+            /**
+             * the value function
+             * @type {function(number): number}
+             */
+            valueFunctions.sine,  // the value function
+            /**
+             * the render target
+             * @type {HTMLCanvasElement}
+             */
+            document.getElementById('canvas-sine-wave-demo'),
+            /**
+             * The render function. This function is called for each step in the arrangement, to "render" the current "frame".
+             *
+             * This function takes the value returned by the value function, and draws a dot on the canvas.
+             * @param {number} syncStep the current syncStep for the Arrangement. All renderers will be called with the same syncStep
+             * @param {HTMLCanvasElement} target the render target. In this case we expect a canvas element
+             * @param {number} value the value returned by the value function
+             */
+            (syncStep, value, target) => {
+                const ctx = target.getContext('2d');
+
+                const x = target.width / 2;  // center the dot horizontally
+
+                canvasRenderFunctions.renderCircle(target, value, {x: x, radius: 10});
+            },
+        ),
+    ];
+
+    let arrangement = new LoopatronArrangement(demoRenderers);
+    arrangement.addControls(document.getElementById('loopatron-arrangement-controls'));
+    arrangement.play();
+</script>
+
+</body>
+</html>

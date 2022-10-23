@@ -2,56 +2,12 @@
 <html lang="en">
 <head>
     <title>Loopatron Demos/Tests: Kitchen Sink Canvas Demo</title>
-    <style>
-        /** @TODO move to external stylesheet - EF 2022-10-19 */
-        .loopatron-grid {
-            display: flex;
-            flex-wrap: wrap;
-        }
-
-        .loopatron-renderer {
-        }
-
-        .loopatron-renderer__output {
-            /* note: don't set height or width here. We want to set <canvas> size directly
-             See https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_usage
-             */
-            border: 1px solid black;
-            margin: 1rem;
-            padding: 0;
-        }
-
-        .loopatron-renderer__output__canvas {
-            background-color: transparent;
-        }
-
-        #controls {
-            display: flex;
-            flex-direction: row;
-            flex-wrap: wrap;
-            margin: 1rem;
-            padding: 0;
-        }
-
-        #sync-step {
-            display: inline-block;
-            font-family: "DejaVu Sans Mono", monospace;
-            font-size: 1.3rem;
-            user-select: text;
-
-        }
-
-        #step-forward {
-            /* flip the button */
-            transform: matrix(-1, 0, 0, 1, 0, 0);
-            /* rotate 180 degrees */
-            /*transform: rotate(180deg);*/
-        }
-    </style>
+    <link rel="stylesheet" href="demos.css">
 </head>
 <body>
 
-<div id="controls">
+<!-- @TODO make this a webcomponent to share between demos -->
+<div id="loopatron-arrangement-controls">
     <!-- the current syncstep value -->
     <div id="sync-step">
     </div>
@@ -95,8 +51,6 @@
             <path d="M0 0h24v24H0z" fill="none"/>
         </svg>
     </div>
-
-
 </div>
 
 <div class="loopatron-grid">
@@ -114,7 +68,7 @@
     import {valueFunctions} from "../src/valueFunctions.js";
     import canvasOutputFunctions from "../src/canvas/canvasRenderFunctions.js";
     import valueHelpers from "../src/valueHelpers.js";
-    import {DEFAULT_RANGE, DEFAULT_STEP_INCREMENT_SINE} from "../src/consts.js";
+    import {DEFAULT_RANGE} from "../src/consts.js";
 
     const C64DISASM_EN = `.,ACB8 20 06 A9 JSR $A906       scan for next BASIC statement ([:] or [EOL])
 .,ACBB C8       INY             increment index to next byte
@@ -393,65 +347,18 @@
         renderer5,
         renderer6,
     ]);
+    arrangement.clearBeforeEveryFrame = false;
+    arrangement.addControls(document.getElementById("loopatron-arrangement-controls"))
+    arrangement.play();
 
     // execute when dom is ready
-    document.addEventListener("DOMContentLoaded", function (event) {
+    document.addEventListener("DOMContentLoaded", function (arrangement) {
         // kill any form submissions
         document.querySelectorAll('form').forEach((form) => {
             form.addEventListener('submit', (e) => {
                 e.preventDefault();
             });
         });
-
-        // pause handler
-        document.getElementById("pause").addEventListener("click", (e) => {
-            e.stopPropagation();
-            arrangement.pause();
-        });
-
-        // play/resume handler
-        document.getElementById("play").addEventListener("click", (e) => {
-            e.stopPropagation();
-            arrangement.resume();
-        });
-
-        // stop handler
-        document.getElementById("stop").addEventListener("click", (e) => {
-            e.stopPropagation();
-            arrangement.stop();
-        });
-
-        // step-backward handler
-        document.getElementById("step-backward").addEventListener("click", (e) => {
-            e.stopPropagation();
-            arrangement.stepBackward();
-        });
-
-        // step-forward handler
-        document.getElementById("step-forward").addEventListener("click", (e) => {
-            e.stopPropagation();
-            arrangement.stepForward();
-        });
-
-        // add a renderer for the syncstep HTML
-        const syncStepRenderer = new LoopatronRenderer(
-            valueFunctions.ramp,
-            document.getElementById("sync-step"),
-            /**
-             * @param {Number} syncStep
-             * @param {Number} v
-             * @param {HTMLElement} t
-             */
-            (syncStep, v, t) => {
-                // pad syncstep with 6 leading zeroes
-                t.innerHTML = `SS:${syncStep.toString().padStart(6, '0')}`;
-            }
-        );
-        arrangement.addRenderer(syncStepRenderer);
-
-        arrangement.play();
-
-
     });
 
 
