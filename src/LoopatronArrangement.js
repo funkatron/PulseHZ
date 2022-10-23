@@ -31,6 +31,10 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
          */
         syncStep: 0,
         /**
+         * @type {boolean} defaults to true. If true, the arrangement will clear every renderTarget before rendering
+         */
+        clearBeforeEveryFrame: true,
+        /**
          * @type {Number} default to 60
          */
         fps: fps,
@@ -63,16 +67,22 @@ let LoopatronArrangement = function (renderers = [], fps = DEFAULT_FPS) {
             this._mainLoopInterval = setInterval(async () => {
 
                 // clear outputs
-                let clearPromises = this.renderers.map(r => {
-                    if (r.output instanceof HTMLCanvasElement) {
-                        // if this is an HTMLCanvasElement, clear it
-                        return canvasOutputFunctions.clearCanvas(r.renderTarget);
-                    } else if (r.output instanceof HTMLElement) {
-                        // if this is an HTMLElement, clear it
-                        return r.output.innerHTML = "";
-                    }
-                });
-                await Promise.all(clearPromises);
+                if (!!this.clearBeforeEveryFrame) {
+                    let clearPromises = this.renderers.map(r => {
+                        if (r.renderTarget instanceof HTMLCanvasElement) {
+                            // if this is an HTMLCanvasElement, clear it
+                            return canvasOutputFunctions.clearCanvas(r.renderTarget);
+                        } else if (r.renderTarget instanceof HTMLElement) {
+                            // if this is an HTMLElement, clear it
+                            return r.renderTarget.innerHTML = "";
+                        } else {
+                            // otherwise, do nothing
+                            console.log(`LoopatronArrangement.play: no clear function for this renderTarget type (${r.renderTarget.constructor.name})`);
+                            return Promise.resolve();
+                        }
+                    });
+                    await Promise.all(clearPromises);
+                }
 
                 // render
                 let renderPromises = this.renderers.map(r => {
