@@ -12,6 +12,10 @@ export default {
     renderXYAxes(canvas, options) {  // x = NaN, y = NaN, rotation = NaN) {
         const ctx = canvas.getContext('2d')
 
+        if (!options) {
+            options = {}
+        }
+
         let x = canvas.width / 2;
         let y = canvas.height / 2;
         let rotation = 0;
