@@ -6,10 +6,13 @@ export default {
      * @param {{x: Number?, y: Number?, rotation: Number?}?} options
      * @param {Number} options.x the x position of the canvas. Default is 0
      * @param {Number} options.y the y position of the canvas. Default is 0
+     * @param {Number} options.rotation the rotation of the canvas in radians. Default is 0
+     * @param {Boolean} options.dashes whether to add dashes to the x axes. Default is False
+     *
      *
      * @returns {CanvasRenderingContext2D}
      */
-    renderXYAxes(canvas, options) {  // x = NaN, y = NaN, rotation = NaN) {
+    renderXYAxes(canvas, options) {  // x = NaN, y = NaN, rotation = NaN, ) {
         const ctx = canvas.getContext('2d')
 
         if (!options) {
@@ -30,7 +33,7 @@ export default {
         }
 
         if (options && options["x"]) {
-            x = valueHelpers.scaleToLogValue(options["x"], canvasXRange);
+            x = valueHelpers.scaleValue(options["x"], canvasXRange);
         }
 
         if (options && options["y"]) {
@@ -56,12 +59,12 @@ export default {
         ctx.moveTo(0, -canvas.height - bleedY);
         ctx.lineTo(0, canvas.height + bleedY);
 
-        // draw dashes on the X axis
-        const NUM_DASHES = 10;
-        for (let i = -canvas.width - bleedX; i < canvas.width + bleedX; i += NUM_DASHES) {
-            ctx.moveTo(i, 0);
-            ctx.lineTo(i, 5);
-
+        if (options.dashes) {
+            const NUM_DASHES = 10;
+            for (let i = -canvas.width - bleedX; i < canvas.width + bleedX; i += NUM_DASHES) {
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, 5);
+            }
         }
 
         ctx.stroke();
@@ -79,6 +82,13 @@ export default {
      * @param {HTMLCanvasElement} canvas
      * @param {Number} genValue the value from the value function of the renderer
      * @param options
+     * @param {Number} [options.x] the x position of the canvas.
+     * @param {Number} [options.y] the y position of the canvas.
+     * @param {Number} [options.radius] the radius of the circle.
+     * @param {Number} [options.startAngle] the start angle of the circle in radians.
+     * @param {Number} [options.endAngle] the end angle of the circle in radians.
+     * @param {String} [options.fillStyleblack] the fill style of the circle.
+     * @param {String} [options.strokeStyleblack] the stroke style of the circle.
      */
     renderCircle(canvas, genValue, options = {}) {
         const circleRadius = canvas.height / 2;
@@ -96,13 +106,7 @@ export default {
 
         let ctx = canvas.getContext('2d')
         ctx.beginPath()
-        ctx.arc(
-            options.x || circleX,
-            options.y || circleY,
-            options.radius || circleRadius,
-            options.startAngle || startAngle,
-            options.endAngle || endAngle
-        )
+        ctx.arc(options.x || circleX, options.y || circleY, options.radius || circleRadius, options.startAngle || startAngle, options.endAngle || endAngle)
 
         // store previous ctx options
         const previousFillStyle = ctx.fillStyle;
@@ -178,8 +182,7 @@ export default {
             }
 
             return {
-                x: (col * width),
-                y: (row * height),
+                x: (col * width), y: (row * height),
             }
         }
 
@@ -189,8 +192,7 @@ export default {
             fill: false,
             stroke: true,
             radius: canvas.height / 64,
-            padding: 0,
-            ...options
+            padding: 0, ...options
         };
 
         const ctx = canvas.getContext('2d')
@@ -314,8 +316,9 @@ export default {
     /**
      * @param {HTMLCanvasElement} canvas
      * @param {Number} genValue
+     * @param {x:number, y:numer, radius:number, strokeStyle:String, lineWidth: number}options
      */
-    renderCircleLine(canvas, genValue) {
+    renderCircleLine(canvas, genValue, options = {}) {
         let ctx = canvas.getContext('2d')
 
         // store previous ctx options
@@ -324,10 +327,16 @@ export default {
 
         ctx.beginPath()
         genValue = valueHelpers.scaleValue(genValue, [0 - (canvas.width / 2), canvas.width / 2]);
-        // this.renderText(canvas, `GEN:${genValue}`);
-        ctx.arc(canvas.width / 2 + genValue, canvas.height / 2 - genValue, Math.abs(genValue), 0, 20)
-        ctx.strokeStyle = "black";
-        ctx.lineWidth = 8;
+        let x = options.x || canvas.width / 2;
+        let y = options.y || canvas.height / 2;
+        let radius = options.radius || canvas.width / 2 - 10 - genValue;
+        // let endAngle = valueHelpers.scaleValue(genValue, [0, 2 * Math.PI]);
+        // let startAngle = endAngle - Math.PI / 2;
+        let endAngle = valueHelpers.scaleValue(genValue, [0, 2 * Math.PI]);
+        let startAngle = 0;
+        ctx.arc(x + genValue, y, Math.abs(genValue), startAngle, 2 * Math.PI);
+        ctx.strokeStyle = options.strokeStyle || "white";
+        ctx.lineWidth = options.lineWidth || 2;
         ctx.stroke()
 
         // restore previous ctx options
@@ -337,10 +346,10 @@ export default {
 
     /**
      * @param {HTMLElement} canvas
-     * @param {Number|string} text
-     * @param {{}|{x: number, y: Number, fillStyle: string, font: string, strokeStyle: string}} options
+     * @param {string} text
+     * @param {{x: number, y: Number, fillStyle: string, font: string, strokeStyle: string}?} options
      */
-    renderText(canvas, text, options) {
+    renderText(canvas, text, options = {}) {
         let ctx = canvas.getContext('2d');
 
         let x = 5

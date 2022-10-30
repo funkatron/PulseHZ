@@ -1,70 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Loopatron Demos/Tests: Kitchen Sink Canvas Demo</title>
+    <title>PulseHZ Demos/Tests: Kitchen Sink Canvas Demo</title>
     <link rel="stylesheet" href="demos.css">
 </head>
-<body>
+<body class="pulsehz-page__body">
 
 <!-- @TODO make this a webcomponent to share between demos -->
-<div id="loopatron-arrangement-controls">
-    <!-- the current syncstep value -->
-    <div id="sync-step">
-    </div>
-
-    <!-- an svg arrow to step backwards -->
-    <div id="step-backward">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
-            <path d="M0 0h24v24H0z" fill="none"/>
-        </svg>
-    </div>
-
-    <!-- and svg square to stop -->
-    <div id="stop">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-            <path d="M6 6h12v12H6z"/>
-            <path d="M0 0h24v24H0z" fill="none"/>
-        </svg>
-    </div>
-
-    <!-- an svg pause button -->
-    <div id="pause">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-            <path d="M0 0h24v24H0z" fill="none"/>
-        </svg>
-    </div>
-
-    <!-- an svg play button -->
-    <div id="play">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-            <path d="M0 0h24v24H0z" fill="none"/>
-        </svg>
-    </div>
-
-    <!-- an svg arrow to skip forward -->
-    <div id="step-forward">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
-            <path d="M0 0h24v24H0z" fill="none"/>
-        </svg>
-    </div>
+<div id="pulsehz-arrangement-controls">
 </div>
 
-<div class="loopatron-grid">
-    <div class="loopatron-renderer">
-        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+<div class="pulsehz-grid">
+    <div class="pulsehz-renderer">
+        <canvas class="pulsehz-renderer__output pulsehz-renderer__output__canvas"
                 id="canvas2"
-                height="512"
-                width="1024"></canvas>
+                height="1080"
+                width="1920"></canvas>
     </div>
 </div>
 
 <script type="module">
-    import {LoopatronArrangement} from "../src/LoopatronArrangement.js";
-    import {LoopatronRenderer} from "../src/LoopatronRenderer.js";
+    import {Arrangement} from "../src/Arrangement.js";
+    import {RenderLoop} from "../src/RenderLoop.js";
     import {valueFunctions} from "../src/valueFunctions.js";
     import canvasOutputFunctions from "../src/canvas/canvasRenderFunctions.js";
     import valueHelpers from "../src/valueHelpers.js";
@@ -96,250 +53,250 @@
 .,ACE3 A6 11    LDX $11         get INPUT mode flag, $00 = INPUT, $40 = GET, $98 = READ
 .,ACE5 10 03    BPL $ACEA       branch if INPUT or GET`; // end of C64DISASM_EN
 
-    const renderer1 = new LoopatronRenderer(
-        valueFunctions.ramp,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep the current syncStep value
-         * @param {Number} v the value passed to the renderer
-         * @param {HTMLCanvasElement} t the target element. In this case we are expecting an HTMLCanvasElement
-         */
-        (syncStep, v, t) => {
-            canvasOutputFunctions.renderCircle(t, v, {
-                radius: t.width / 4,
-                x: t.width / 2,
-                y: t.width / 2,
-                fill: true
-            });
+    const renderer1 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.ramp, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep the current syncStep value
+             * @param {Number} v the value passed to the renderer
+             * @param {HTMLCanvasElement} t the target element. In this case we are expecting an HTMLCanvasElement
+             */
+                (syncStep, v, t) => {
+                canvasOutputFunctions.renderCircle(t, v, {
+                    radius: t.width / 4,
+                    x: t.width / 2,
+                    y: t.width / 2,
+                    fill: true
+                });
 
-            // scale the value to radians
-            let rotationValue = Math.log2(valueHelpers.scaleValue(v, [0, Math.PI * 2]));
-            // change color based on v and syncStep
-            let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [0, 360]))}, 100%, 50%)`;
-            // set the stroke color
+                // scale the value to radians
+                let rotationValue = Math.log2(valueHelpers.scaleValue(v, [0, Math.PI * 2]));
+                // change color based on v and syncStep
+                let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [0, 360]))}, 100%, 50%)`;
+                // set the stroke color
 
-            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue, lineWidth: 200, strokeStyle: color});
-            // canvasOutputFunctions.renderXYAxes(t, );
-        }
-    );
-
-    const renderer2 = new LoopatronRenderer(
-        valueFunctions.sine,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
-         */
-        (syncStep, v, t) => {
-            canvasOutputFunctions.renderCircleGrid(t, v);
-            // set color to values of pink and blue based on v
-            let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [198, 294]))}, 72%, 56%, 0.5)`;
-            canvasOutputFunctions.renderXYAxes(t, {x: v, strokeStyle: color, lineWidth: t.height / 2});
-        }
-    );
-
-    const renderer3 = new LoopatronRenderer(
-        valueFunctions.sine,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
-         */
-        (syncStep, v, t) => {
-            // make 20 of these lines
-            for (let i = 0; i < 20; i++) {
-                canvasOutputFunctions.renderRedVerticalLine(t, v * i / 20)
-                canvasOutputFunctions.renderRedHorizontalLine(t, v * i / 20 + t.height * 0.1)
+                canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue, lineWidth: 200, strokeStyle: color});
+                // canvasOutputFunctions.renderXYAxes(t, );
             }
         }
     );
 
-    const renderer4 = new LoopatronRenderer(
-        valueFunctions.sine,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
-         */
-        (syncStep, v, t) => {
-            // scale rotation value to radians
-            let rotationValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
-            canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue});
-            canvasOutputFunctions.renderCircleLine(t, v);
-            canvasOutputFunctions.renderCircleLine(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
-            canvasOutputFunctions.renderCircle(t, v, {
-                fill: true,
-                stroke: true,
-                fillStyle: `rgba(255, 255, 255, 0.5)`
-            });
-            canvasOutputFunctions.renderCornerZoomCircles(t, v);
-            canvasOutputFunctions.renderCornerZoomCircles(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
+    const renderer2 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.sine, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLCanvasElement} t
+             */
+                (syncStep, v, t) => {
+                canvasOutputFunctions.renderCircleGrid(t, v);
+                // set color to values of pink and blue based on v
+                let color = `hsl(${Math.floor(valueHelpers.scaleValue(v, [198, 294]))}, 72%, 56%, 0.5)`;
+                canvasOutputFunctions.renderXYAxes(t, {x: v, strokeStyle: color, lineWidth: t.height / 2});
+            }
         }
     );
 
-    const renderer5 = new LoopatronRenderer(
-        valueFunctions.ramp,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
-         */
-        (syncStep, v, t) => {
-            // split this string into lines
-            const lines = C64DISASM_EN.split("\n");
-            const lineIdx = Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))
-            // get random val from lines
-            const randomIdx = Math.floor(Math.random() * lines.length);
-            const fontEm = randomIdx % 2 === 0 ? 1 : 3;
-            const line = lines[randomIdx];
-            const yVal = valueHelpers.scaleValue(lineIdx, DEFAULT_RANGE, [0, lines.length - 1])
-
-            canvasOutputFunctions.renderText(t, line, {
-                x: 0,
-                y: yVal,
-                font: `normal ${fontEm}em "DejaVu Sans Mono", "Lucida Console", monospace`,
-                fillStyle: 'rgba(255, 255, 255, 0.5)',
-                strokeStyle: 'rgba(0, 0 , 0, 1)'
-            });
+    const renderer3 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.sine, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLCanvasElement} t
+             */
+                (syncStep, v, t) => {
+                // make 20 of these lines
+                for (let i = 0; i < 20; i++) {
+                    canvasOutputFunctions.renderRedVerticalLine(t, v * i / 20)
+                    canvasOutputFunctions.renderRedHorizontalLine(t, v * i / 20 + t.height * 0.1)
+                }
+            }
         }
     );
 
-    const renderer6 = new LoopatronRenderer(
-        valueFunctions.ramp,
-        document.getElementById("canvas2"),
-        /**
-         * @param {Number} syncStep
-         * @param {Number} v
-         * @param {HTMLCanvasElement} t
-         */
-        (syncStep, v, t) => {
-            // draw a dot that rotates around the center of the canvas
-            let orbitRadius = t.width / 2;
-            let dotRadius = t.width / 20;
-
-            // scale to radians
-            let radiansValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
-            let x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
-            let y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: x,
-                    y: y,
-                    radius: dotRadius,
-                }
-            );
-
-            // draw a line for the path of the dot
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: t.width / 2,
-                    y: t.height / 2,
-                    radius: orbitRadius,
-                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
-                    lineWidth: dotRadius / 2,
-                    fill: false,
+    const renderer4 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.sine, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLCanvasElement} t
+             */
+                (syncStep, v, t) => {
+                // scale rotation value to radians
+                let rotationValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+                canvasOutputFunctions.renderXYAxes(t, {rotation: rotationValue});
+                canvasOutputFunctions.renderCircleLine(t, v);
+                canvasOutputFunctions.renderCircleLine(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
+                canvasOutputFunctions.renderCircle(t, v, {
+                    fill: true,
                     stroke: true,
-                }
-            );
+                    fillStyle: `rgba(255, 255, 255, 0.5)`
+                });
+                canvasOutputFunctions.renderCornerZoomCircles(t, v);
+                canvasOutputFunctions.renderCornerZoomCircles(t, valueHelpers.scaleValue(v, DEFAULT_RANGE, [DEFAULT_RANGE[1], DEFAULT_RANGE[0]]));
+            }
+        }
+    );
 
-            // draw a line from the bottom of the canvas to the center of the dot
-            canvasOutputFunctions.renderLine(t,
-                v,
-                {
-                    x2: x,
-                    y2: y,
-                    x1: t.width / 2,
-                    y1: t.height + dotRadius,
-                    lineWidth: dotRadius / 2,
-                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
-                }
-            );
+    const renderer5 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.ramp, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLCanvasElement} t
+             */
+                (syncStep, v, t) => {
+                // split this string into lines
+                const lines = C64DISASM_EN.split("\n");
+                const lineIdx = Math.floor(valueHelpers.scaleValue(v, [0, lines.length - 1]))
+                // get random val from lines
+                const randomIdx = Math.floor(Math.random() * lines.length);
+                const fontEm = randomIdx % 2 === 0 ? 1 : 3;
+                const line = lines[randomIdx];
+                const yVal = valueHelpers.scaleValue(lineIdx, DEFAULT_RANGE, [0, lines.length - 1])
 
+                canvasOutputFunctions.renderText(t, line, {
+                    x: 0,
+                    y: yVal,
+                    font: `normal ${fontEm}em "DejaVu Sans Mono", "Lucida Console", monospace`,
+                    fillStyle: 'rgba(255, 255, 255, 0.5)',
+                    strokeStyle: 'rgba(0, 0 , 0, 1)'
+                });
+            }
+        }
+    );
 
-            orbitRadius = t.width / 3;
-            dotRadius = t.width / 30;
-            x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
-            y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: x,
-                    y: y,
-                    radius: dotRadius
-                }
-            );
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: t.width / 2,
-                    y: t.height / 2,
-                    radius: orbitRadius,
-                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
-                    lineWidth: dotRadius / 2,
-                    fill: false,
-                    stroke: true,
-                }
-            );
-            canvasOutputFunctions.renderLine(t,
-                v,
-                {
-                    x2: x,
-                    y2: y,
-                    x1: t.width / 2,
-                    y1: t.height + dotRadius,
-                    lineWidth: dotRadius / 3,
-                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
-                }
-            );
+    const renderer6 = new RenderLoop(
+        {
+            valueFunction: valueFunctions.ramp, renderTarget: document.getElementById("canvas2"), renderFunction: /**
+             * @param {Number} syncStep
+             * @param {Number} v
+             * @param {HTMLCanvasElement} t
+             */
+                (syncStep, v, t) => {
+                // draw a dot that rotates around the center of the canvas
+                let orbitRadius = t.width / 2;
+                let dotRadius = t.width / 20;
 
+                // scale to radians
+                let radiansValue = valueHelpers.scaleValue(v, [0, Math.PI * 2]);
+                let x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+                let y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: x,
+                        y: y,
+                        radius: dotRadius,
+                    }
+                );
 
-            orbitRadius = t.width / 5;
-            dotRadius = t.width / 40;
-            x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
-            y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: x,
-                    y: y,
-                    radius: dotRadius
-                }
-            );
-            canvasOutputFunctions.renderCircle(t,
-                v,
-                {
-                    x: t.width / 2,
-                    y: t.height / 2,
-                    radius: orbitRadius,
-                    strokeStyle: 'rgba(0, 0, 0, 0.1)',
-                    lineWidth: dotRadius / 2,
-                    fill: false,
-                    stroke: true,
-                }
-            );
+                // draw a line for the path of the dot
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: t.width / 2,
+                        y: t.height / 2,
+                        radius: orbitRadius,
+                        strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                        lineWidth: dotRadius / 2,
+                        fill: false,
+                        stroke: true,
+                    }
+                );
 
-            canvasOutputFunctions.renderLine(t,
-                v,
-                {
-                    x2: x,
-                    y2: y,
-                    x1: t.width / 2,
-                    y1: t.height + dotRadius,
-                    lineWidth: dotRadius / 4,
-                    strokeStyle: 'rgba(0, 0, 0, 0.3)'
-                }
-            );
+                // draw a line from the bottom of the canvas to the center of the dot
+                canvasOutputFunctions.renderLine(t,
+                    v,
+                    {
+                        x2: x,
+                        y2: y,
+                        x1: t.width / 2,
+                        y1: t.height + dotRadius,
+                        lineWidth: dotRadius / 2,
+                        strokeStyle: 'rgba(0, 0, 0, 0.3)'
+                    }
+                );
 
 
+                orbitRadius = t.width / 3;
+                dotRadius = t.width / 30;
+                x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+                y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: x,
+                        y: y,
+                        radius: dotRadius
+                    }
+                );
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: t.width / 2,
+                        y: t.height / 2,
+                        radius: orbitRadius,
+                        strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                        lineWidth: dotRadius / 2,
+                        fill: false,
+                        stroke: true,
+                    }
+                );
+                canvasOutputFunctions.renderLine(t,
+                    v,
+                    {
+                        x2: x,
+                        y2: y,
+                        x1: t.width / 2,
+                        y1: t.height + dotRadius,
+                        lineWidth: dotRadius / 3,
+                        strokeStyle: 'rgba(0, 0, 0, 0.3)'
+                    }
+                );
+
+
+                orbitRadius = t.width / 5;
+                dotRadius = t.width / 40;
+                x = Math.cos(radiansValue) * orbitRadius + t.width / 2;
+                y = Math.sin(radiansValue) * orbitRadius + t.height / 2;
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: x,
+                        y: y,
+                        radius: dotRadius
+                    }
+                );
+                canvasOutputFunctions.renderCircle(t,
+                    v,
+                    {
+                        x: t.width / 2,
+                        y: t.height / 2,
+                        radius: orbitRadius,
+                        strokeStyle: 'rgba(0, 0, 0, 0.1)',
+                        lineWidth: dotRadius / 2,
+                        fill: false,
+                        stroke: true,
+                    }
+                );
+
+                canvasOutputFunctions.renderLine(t,
+                    v,
+                    {
+                        x2: x,
+                        y2: y,
+                        x1: t.width / 2,
+                        y1: t.height + dotRadius,
+                        lineWidth: dotRadius / 4,
+                        strokeStyle: 'rgba(0, 0, 0, 0.3)'
+                    }
+                );
+
+
+            }
         })
 
-    const arrangement = new LoopatronArrangement([
+    const arrangement = new Arrangement([
         renderer1,
         renderer2,
         renderer3,
@@ -348,7 +305,7 @@
         renderer6,
     ]);
     arrangement.clearBeforeEveryFrame = false;
-    arrangement.addControls(document.getElementById("loopatron-arrangement-controls"))
+    arrangement.addControls(document.getElementById("pulsehz-arrangement-controls"))
     arrangement.play();
 
     // execute when dom is ready

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <title>Simple Sin Wave Demo</title>
+    <link rel="stylesheet" href="demos.css">
+</head>
+<body class="pulsehz-page__body">
+
+<!-- @TODO make this a webcomponent to share between demos -->
+<div id="pulsehz-arrangement-controls">
+</div>
+
+<div class="pulsehz-grid">
+    <div class="pulsehz-renderer">
+        <canvas class="pulsehz-renderer__output pulsehz-renderer__output__canvas"
+                id="canvas-sine-wave-demo"
+                width="200"
+                height="200"></canvas>
+    </div>
+</div>
+
+<script type="module">
+    import {Arrangement} from "../src/Arrangement.js";
+    import {RenderLoop} from "../src/RenderLoop.js";
+    import {valueFunctions} from "../src/valueFunctions.js";
+    import canvasRenderFunctions from "../src/canvas/canvasRenderFunctions.js";
+    import valueHelpers from "../src/valueHelpers.js";
+    import {DEFAULT_BEATS_PER_BAR, DEFAULT_BARS_PER_LOOP, DEFAULT_STEPS_PER_BEAT} from "../src/consts.js";
+
+
+    const demoRenderers = [
+        new RenderLoop(
+            /**
+             * the value function
+             * @type {function(number): number}
+             */
+            {
+                valueFunction: valueFunctions.sine,
+                renderTarget: document.getElementById('canvas-sine-wave-demo'),
+                renderFunction: /**
+                 * The render function. This function is called for each step in the arrangement, to "render" the current "frame".
+                 *
+                 * This function takes the value returned by the value function, and draws a dot on the canvas.
+                 * @param {number} syncStep the current syncStep for the Arrangement. All renderers will be called with the same syncStep
+                 * @param {HTMLCanvasElement} target the render target. In this case we expect a canvas element
+                 * @param {number} value the value returned by the value function
+                 */
+                (syncStep, value, target) => {
+
+                    let color = 'black';
+                    let radius = 4;
+
+                    let rotation = valueFunctions.ramp(syncStep, 0, Math.PI * 2);
+                    let axesOpts = {rotation: rotation}
+                    canvasRenderFunctions.renderXYAxes(target, axesOpts);
+
+                    let circleX = valueFunctions.ramp(syncStep, 0 - 1, target.width + 1);
+                    let circleOpts = {
+                        x: circleX,
+                        radius: radius,
+                        fillStyle: color,
+                        strokeStyle: color
+                    };
+                    canvasRenderFunctions.renderCircle(target, value, circleOpts);
+                    let debugText = `syncStep: ${syncStep} value: ${value} circleX: ${circleX}`;
+                    canvasRenderFunctions.renderText(target, debugText);
+
+                    // play a metrionote sound every 10 steps
+
+                }
+            },
+        ),
+    ];
+
+    let arrangement = new Arrangement(demoRenderers);
+    arrangement.addControls(document.getElementById('pulsehz-arrangement-controls'));
+    arrangement.play();
+
+</script>
+
+</body>
+</html>

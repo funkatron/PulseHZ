@@ -8,12 +8,12 @@
 <body>
 
 <!-- @TODO make this a webcomponent to share between demos -->
-<div id="loopatron-arrangement-controls">
+<div id="pulsehz-arrangement-controls">
 </div>
 
-<div class="loopatron-grid">
-    <div class="loopatron-renderer">
-        <canvas class="loopatron-renderer__output loopatron-renderer__output__canvas"
+<div class="pulsehz-grid">
+    <div class="pulsehz-renderer">
+        <canvas class="pulsehz-renderer__output pulsehz-renderer__output__canvas"
                 id="canvas-sine-wave-demo"
                 height="768"
                 width="384"></canvas>
@@ -21,41 +21,27 @@
 </div>
 
 <script type="module">
-    import {LoopatronArrangement} from "../src/LoopatronArrangement.js";
-    import {LoopatronRenderer} from "../src/LoopatronRenderer.js";
+    import {Arrangement} from "../src/Arrangement.js";
+    import {RenderLoop} from "../src/RenderLoop.js";
     import {valueFunctions} from "../src/valueFunctions.js";
     import canvasRenderFunctions from "../src/canvas/canvasRenderFunctions.js";
 
     const demoRenderers = [
-        new LoopatronRenderer(
-            /**
-             * the value function
-             * @type {function(number): number}
-             */
-            valueFunctions.sine,  // the value function
-            /**
-             * the render target
-             * @type {HTMLCanvasElement}
-             */
-            document.getElementById('canvas-sine-wave-demo'),
-            /**
-             * The render function. This function is called for each step in the arrangement, to "render" the current "frame".
-             *
-             * This function takes the value returned by the value function, and draws a dot on the canvas.
-             * @param {number} syncStep the current syncStep for the Arrangement. All renderers will be called with the same syncStep
-             * @param {HTMLCanvasElement} target the render target. In this case we expect a canvas element
-             * @param {number} value the value returned by the value function
-             */
-            (syncStep, value, target) => {
-                const x = target.width / 2;  // center the dot horizontally
+        new RenderLoop({
+                valueFunction: valueFunctions.sine,  // the value function
+                renderTarget: document.getElementById('canvas-sine-wave-demo'),
+                renderFunction:
+                    (syncStep, value, target) => {
+                        const x = target.width / 2;  // center the dot horizontally
 
-                canvasRenderFunctions.renderCircle(target, value, {x: x, radius: 10});
+                        canvasRenderFunctions.renderCircle(target, value, {x: x, radius: 10});
+                    }
             },
         ),
     ];
 
-    let arrangement = new LoopatronArrangement(demoRenderers);
-    arrangement.addControls(document.getElementById('loopatron-arrangement-controls'));
+    let arrangement = new Arrangement(demoRenderers);
+    arrangement.addControls(document.getElementById('pulsehz-arrangement-controls'));
     arrangement.play();
 </script>
 

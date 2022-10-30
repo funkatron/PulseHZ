@@ -1,38 +1,65 @@
-.loopatron-grid {
+.pulsehz-grid {
     display: flex;
     flex-wrap: wrap;
 }
 
-.loopatron-renderer {
+.pulsehz-renderer {
 }
 
-.loopatron-renderer__output {
+.pulsehz-renderer__output {
     /* note: don't set height or width here. We want to set <canvas> size directly
      See https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_usage
      */
-    border: 1px solid black;
-    margin: 1rem;
+    /*border: 1px solid black;*/
+    /*margin: 1rem;*/
     padding: 0;
 }
 
-.loopatron-renderer__output__canvas {
-    background-color: transparent;
+.pulsehz-renderer__output__canvas {
+    background-color: white;
+    border: 1px solid black
 }
 
-#loopatron-arrangement-controls {
+#pulsehz-arrangement-controls {
+    /* float on top of the body */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    z-index: 1000;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 1rem;
+    border: 1px solid black;
+
+}
+
+.pulsehz-controls__container {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    margin: 1rem;
     padding: 0;
+    /* vertically center the controls */
+    align-items: center;
 }
 
-#sync-step {
+.pulsehz-controls__checkbox {
+    display: inline-block;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 0.9rem;
+    user-select: text;
+}
+
+.pulsehz-controls__text-debug {
     display: inline-block;
     font-family: "DejaVu Sans Mono", monospace;
     font-size: 1.3rem;
     user-select: text;
 
+}
+
+.pulsehz-page__body {
+    padding:0;
+    background: #FFF;
+    margin: 0 auto;
 }
 
 #step-forward {

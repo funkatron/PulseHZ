@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <title>More Complex Sin Wave Demo</title>
+    <link rel="stylesheet" href="demos.css">
+</head>
+<body class="pulsehz-page__body">
+
+<!-- @TODO make this a webcomponent to share between demos -->
+<div id="pulsehz-arrangement-controls">
+</div>
+
+<div class="pulsehz-grid">
+    <div class="pulsehz-renderer">
+        <canvas class="pulsehz-renderer__output pulsehz-renderer__output__canvas"
+                id="canvas-sine-wave-demo"
+                height="1080`"
+                width="1920"></canvas>
+    </div>
+</div>
+
+<script type="module">
+    import {Arrangement} from "../src/Arrangement.js";
+    import {RenderLoop} from "../src/RenderLoop.js";
+    import {valueFunctions} from "../src/valueFunctions.js";
+    import canvasRenderFunctions from "../src/canvas/canvasRenderFunctions.js";
+    import valueHelpers from "../src/valueHelpers.js";
+    import {GEN_MAX} from "../src/consts.js";
+
+    const demoRenderers = [
+        new RenderLoop(
+            /**
+             * the value function
+             * @type {function(number): number}
+             */
+            {
+                valueFunction: valueFunctions.sine,
+                renderTarget: document.getElementById('canvas-sine-wave-demo'),
+                renderFunction: /**
+                 * The render function. This function is called for each step in the arrangement, to "render" the current "frame".
+                 *
+                 * This function takes the value returned by the value function, and draws a dot on the canvas.
+                 * @param {number} syncStep the current syncStep for the Arrangement. All renderers will be called with the same syncStep
+                 * @param {HTMLCanvasElement} target the render target. In this case we expect a canvas element
+                 * @param {number} value the value returned by the value function
+                 */
+                    (syncStep, value, target) => {
+
+                    // rotate colors based on syncStep
+                    const color = `hsl(${syncStep % 360}, 50%, 50%)`;
+                    // find complementary color using hsl math
+                    const complementaryColor = `hsl(${(syncStep + 180) % 360}, 50%, 50%)`;
+                    // find another complementary color using hsl math
+                    const complementaryColor2 = `hsl(${(syncStep + 90) % 360}, 50%, 50%)`;
+
+                    // scale syncstep to the width of the canvas
+                    const baseX = syncStep % GEN_MAX;
+                    const x = valueHelpers.scaleValue(baseX, [0, target.width]);
+                    canvasRenderFunctions.renderXYAxes(target, {
+                        strokeStyle: color,
+                        x: baseX,
+                        y: value,
+                        lineWidth: 1,
+                        dashes: false,
+                    });
+                    const radius = valueHelpers.scaleValue(value, [1, 30]);
+                    canvasRenderFunctions.renderCircle(target, value, {
+                        x: x,
+                        radius: radius,
+                        fillStyle: color,
+                        strokeStyle: color
+                    });
+                    // canvasRenderFunctions.renderCircleLine(target, value, {
+                    //     x: x,
+                    //     radius: radius,
+                    //     strokeStyle: color,
+                    // lineWidth: 1
+                    // });
+                }
+            },
+        ),
+    ];
+
+    let arrangement = new Arrangement(demoRenderers);
+    arrangement.addControls(document.getElementById('pulsehz-arrangement-controls'));
+
+    // auto-toggle clear canvas on/off
+    setInterval(() => {
+        this.clearBeforeEveryFrame = !this.clearBeforeEveryFrame;
+        console.log(`clearBeforeEveryFrame: ${this.clearBeforeEveryFrame}`);
+    }, arrangement.fps * 60);
+
+
+    arrangement.play();
+
+</script>
+
+</body>
+</html>
+
+
+
+
+<!-- old Simple Sin Wave Demo -->
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <title>Simple Sin Wave Demo</title>
+    <link rel="stylesheet" href="demos.css">
+</head>
+<body>
+
+<!-- @TODO make this a webcomponent to share between demos -->
+<div id="pulsehz-arrangement-controls">
+</div>
+
+<div class="pulsehz-grid">
+    <div class="pulsehz-renderer">
+        <canvas class="pulsehz-renderer__output pulsehz-renderer__output__canvas"
+                id="canvas-sine-wave-demo"
+                height="768"
+                width="384"></canvas>
+    </div>
+</div>
+
+<script type="module">
+    import {LoopatronArrangement} from "../src/LoopatronArrangement.js";
+    import {LoopatronRenderer} from "../src/LoopatronRenderer.js";
+    import {valueFunctions} from "../src/valueFunctions.js";
+    import canvasRenderFunctions from "../src/canvas/canvasRenderFunctions.js";
+
+    const demoRenderers = [
+        new RenderLoop({
+            /**
+             * the value function
+             * @type {function(number): number}
+             */
+            valueFunction: valueFunctions.sine,  // the value function
+            /**
+             * the render target
+             * @type {HTMLCanvasElement}
+             */
+            renderTarget: document.getElementById('canvas-sine-wave-demo'),
+            /**
+             * The render function. This function is called for each step in the arrangement, to "render" the current "frame".
+             *
+             * This function takes the value returned by the value function, and draws a dot on the canvas.
+             * @param {number} syncStep the current syncStep for the Arrangement. All renderers will be called with the same syncStep
+             * @param {HTMLCanvasElement} target the render target. In this case we expect a canvas element
+             * @param {number} value the value returned by the value function
+             */
+            renderFunction: (syncStep, value, target) => {
+                const x = target.width / 2;  // center the dot horizontally
+
+                canvasRenderFunctions.renderCircle(target, value, {x: x, radius: 10});
+            }
+        }),
+    ];
+
+    let arrangement = new Arrangement(demoRenderers);
+    arrangement.addControls(document.getElementById('pulsehz-arrangement-controls'));
+    arrangement.play();
+</script>
+
+</body>
+</html>
