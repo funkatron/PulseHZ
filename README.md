@@ -1,4 +1,6 @@
-# Loopatron 5000 (LT5K)
+# PulseHZ
+
+## PKA Loopatron 5000 (LT5K)
 
 **Note: this is not even alpha. If you think it's cool, please feel free to make PRs. If you use it, let me know! - EF 2022-10-21**
 
