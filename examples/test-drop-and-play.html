@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layered Video Blend Demo</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+        }
+
+        /* container fills screen */
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* drop zones are at the bottom */
+        .drop-zone {
+            flex: 1;
+            border: 3px dashed #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-family: sans-serif;
+            user-select: none;
+            transition: background 0.2s;
+            overflow: hidden;
+            position: relative;
+            margin: 10px;
+            border-radius: 8px;
+        }
+
+        .drop-zone.hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* background layer */
+        #zone-bg {
+            background: #111;
+            flex: 1;
+        }
+
+        /* foreground layer */
+        #zone-fg {
+            background: #222;
+            flex: 1;
+        }
+
+        /* video styling */
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* preview area */
+        .preview-area {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80vw;
+            height: 60vh;
+            border: 2px solid #444;
+            background: #000;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-family: sans-serif;
+            font-size: 12px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+
+        .preview-area video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* blend mode controls */
+        .blend-controls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-family: sans-serif;
+            z-index: 20;
+        }
+
+        .blend-controls label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .blend-controls select {
+            width: 200px;
+            padding: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .blend-controls select:focus {
+            outline: none;
+            border-color: #888;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div style="flex: 3;"></div>
+        <div style="display: flex; flex: 1;">
+            <div id="zone-bg" class="drop-zone">▶️ Drop background video here</div>
+            <div id="zone-fg" class="drop-zone">▶️ Drop overlay video here</div>
+        </div>
+    </div>
+
+    <div class="preview-area">
+        <div id="preview-text">Preview will appear here</div>
+        <video id="preview-bg" style="z-index: 0;" loop autoplay muted></video>
+        <video id="preview-fg" style="z-index: 1; mix-blend-mode: screen;" loop autoplay muted></video>
+    </div>
+
+    <div class="blend-controls">
+        <label for="blend-mode">Blend Mode:</label>
+        <select id="blend-mode">
+            <option value="normal">normal</option>
+            <option value="multiply">multiply</option>
+            <option value="screen">screen</option>
+            <option value="overlay">overlay</option>
+            <option value="darken">darken</option>
+            <option value="lighten">lighten</option>
+            <option value="color-dodge">color-dodge</option>
+            <option value="color-burn">color-burn</option>
+            <option value="hard-light">hard-light</option>
+            <option value="soft-light">soft-light</option>
+            <option value="difference">difference</option>
+            <option value="exclusion">exclusion</option>
+            <option value="hue">hue</option>
+            <option value="saturation">saturation</option>
+            <option value="color">color</option>
+            <option value="luminosity">luminosity</option>
+        </select>
+    </div>
+
+    <script>
+        function setupDropZone(zoneEl) {
+            zoneEl.addEventListener('dragover', e => {
+                e.preventDefault();
+                zoneEl.classList.add('hover');
+            });
+            zoneEl.addEventListener('dragleave', () => {
+                zoneEl.classList.remove('hover');
+            });
+            zoneEl.addEventListener('drop', e => {
+                e.preventDefault();
+                zoneEl.classList.remove('hover');
+
+                const file = e.dataTransfer.files[0];
+                if (!file || !file.type.startsWith('video/')) {
+                    alert('Please drop a video file.');
+                    return;
+                }
+
+                let vid = zoneEl.querySelector('video');
+                if (!vid) {
+                    vid = document.createElement('video');
+                    vid.loop = true;
+                    vid.autoplay = true;
+                    vid.muted = true; // autoplay policy
+                    zoneEl.innerHTML = '';
+                    zoneEl.appendChild(vid);
+                }
+
+                vid.src = URL.createObjectURL(file);
+                vid.play();
+
+                // Update preview
+                updatePreview();
+            });
+        }
+
+        function updatePreview() {
+            const bgVideo = document.querySelector('#zone-bg video');
+            const fgVideo = document.querySelector('#zone-fg video');
+            const previewBg = document.querySelector('#preview-bg');
+            const previewFg = document.querySelector('#preview-fg');
+            const previewText = document.querySelector('#preview-text');
+
+            if (bgVideo && fgVideo) {
+                previewText.style.display = 'none';
+                previewBg.src = bgVideo.src;
+                previewFg.src = fgVideo.src;
+                previewBg.play();
+                previewFg.play();
+            } else {
+                previewText.style.display = 'block';
+                previewBg.src = '';
+                previewFg.src = '';
+            }
+        }
+
+        function updateBlendMode() {
+            const blendMode = document.getElementById('blend-mode').value;
+            const previewFg = document.querySelector('#preview-fg');
+            previewFg.style.mixBlendMode = blendMode;
+        }
+
+        // Set up blend mode dropdown
+        document.getElementById('blend-mode').addEventListener('change', updateBlendMode);
+
+        // Set initial blend mode
+        document.getElementById('blend-mode').value = 'screen';
+        updateBlendMode();
+
+        document.querySelectorAll('.drop-zone')
+            .forEach(setupDropZone);
+    </script>
+</body>
+
+</html>
