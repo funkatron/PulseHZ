@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# Env/OS
+.venv/
+.env
+.DS_Store
+
+# Node
+node_modules/
+
+# Coverage/pytest
+.coverage
+.pytest_cache/
+
+# Build
+build/
+dist/
+
