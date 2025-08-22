@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layered Video Blend Demo</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+        }
+
+        /* container fills screen */
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* layer controls at the bottom */
+        .layer-controls {
+            display: flex;
+            height: 200px;
+            gap: 10px;
+            padding: 10px;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+
+        .layer-control {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* drop zones */
+        .drop-zone {
+            flex: 1;
+            border: 3px dashed #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-family: sans-serif;
+            user-select: none;
+            transition: background 0.2s;
+            overflow: hidden;
+            position: relative;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            padding: 10px;
+            min-height: 80px;
+        }
+
+        .drop-zone.hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* layer-specific styling */
+        .layer-control:nth-child(1) .drop-zone {
+            background: #111;
+        }
+
+        .layer-control:nth-child(2) .drop-zone {
+            background: #222;
+        }
+
+        .layer-control:nth-child(3) .drop-zone {
+            background: #333;
+        }
+
+        .layer-control:nth-child(4) .drop-zone {
+            background: #444;
+        }
+
+        /* video styling */
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* preview area */
+        .preview-area {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 85vw;
+            height: calc(100vh - 240px);
+            border: 2px solid #444;
+            background: #000;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-family: sans-serif;
+            font-size: 14px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+            min-height: 400px;
+        }
+
+        .preview-area video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* blend mode controls */
+        .blend-controls {
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px;
+            border-radius: 6px;
+            color: white;
+            font-family: sans-serif;
+            min-width: 150px;
+        }
+
+        .blend-controls h3 {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        .blend-controls .control-group {
+            margin-bottom: 8px;
+        }
+
+        .blend-controls .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .blend-controls label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 10px;
+            color: #aaa;
+        }
+
+        .blend-controls select {
+            width: 100%;
+            padding: 4px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+
+        .blend-controls select:focus {
+            outline: none;
+            border-color: #888;
+        }
+
+        /* project controls */
+        .project-controls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-family: sans-serif;
+            z-index: 20;
+            min-width: 220px;
+        }
+
+        .project-controls.hidden {
+            display: none;
+        }
+
+        .project-toggle {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 21;
+        }
+
+        .project-toggle:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+
+        .project-toggle.hidden {
+            transform: translateX(0);
+        }
+
+        .project-controls h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .project-controls button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .project-controls button:hover {
+            background: #444;
+        }
+
+        .project-controls button:last-child {
+            margin-bottom: 0;
+        }
+
+        .project-controls input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="layer-controls">
+            <div class="layer-control">
+                <div id="zone-1" class="drop-zone">1️⃣ Drop video here (bottom layer)</div>
+                <div class="blend-controls">
+                    <label for="blend-mode-1">Blend:</label>
+                    <select id="blend-mode-1">
+                        <option value="normal">normal</option>
+                        <option value="multiply">multiply</option>
+                        <option value="screen">screen</option>
+                        <option value="overlay">overlay</option>
+                        <option value="darken">darken</option>
+                        <option value="lighten">lighten</option>
+                        <option value="color-dodge">color-dodge</option>
+                        <option value="color-burn">color-burn</option>
+                        <option value="hard-light">hard-light</option>
+                        <option value="soft-light">soft-light</option>
+                        <option value="difference">difference</option>
+                        <option value="exclusion">exclusion</option>
+                        <option value="hue">hue</option>
+                        <option value="saturation">saturation</option>
+                        <option value="color">color</option>
+                        <option value="luminosity">luminosity</option>
+                    </select>
+                </div>
+            </div>
+            <div class="layer-control">
+                <div id="zone-2" class="drop-zone">2️⃣ Drop video here</div>
+                <div class="blend-controls">
+                    <label for="blend-mode-2">Blend:</label>
+                    <select id="blend-mode-2">
+                        <option value="normal">normal</option>
+                        <option value="multiply">multiply</option>
+                        <option value="screen">screen</option>
+                        <option value="overlay">overlay</option>
+                        <option value="darken">darken</option>
+                        <option value="lighten">lighten</option>
+                        <option value="color-dodge">color-dodge</option>
+                        <option value="color-burn">color-burn</option>
+                        <option value="hard-light">hard-light</option>
+                        <option value="soft-light">soft-light</option>
+                        <option value="difference">difference</option>
+                        <option value="exclusion">exclusion</option>
+                        <option value="hue">hue</option>
+                        <option value="saturation">saturation</option>
+                        <option value="color">color</option>
+                        <option value="luminosity">luminosity</option>
+                    </select>
+                </div>
+            </div>
+            <div class="layer-control">
+                <div id="zone-3" class="drop-zone">3️⃣ Drop video here</div>
+                <div class="blend-controls">
+                    <label for="blend-mode-3">Blend:</label>
+                    <select id="blend-mode-3">
+                        <option value="normal">normal</option>
+                        <option value="multiply">multiply</option>
+                        <option value="screen">screen</option>
+                        <option value="overlay">overlay</option>
+                        <option value="darken">darken</option>
+                        <option value="lighten">lighten</option>
+                        <option value="color-dodge">color-dodge</option>
+                        <option value="color-burn">color-burn</option>
+                        <option value="hard-light">hard-light</option>
+                        <option value="soft-light">soft-light</option>
+                        <option value="difference">difference</option>
+                        <option value="exclusion">exclusion</option>
+                        <option value="hue">hue</option>
+                        <option value="saturation">saturation</option>
+                        <option value="color">color</option>
+                        <option value="luminosity">luminosity</option>
+                    </select>
+                </div>
+            </div>
+            <div class="layer-control">
+                <div id="zone-4" class="drop-zone">4️⃣ Drop video here (top layer)</div>
+                <div class="blend-controls">
+                    <label for="blend-mode-4">Blend:</label>
+                    <select id="blend-mode-4">
+                        <option value="normal">normal</option>
+                        <option value="multiply">multiply</option>
+                        <option value="screen">screen</option>
+                        <option value="overlay">overlay</option>
+                        <option value="darken">darken</option>
+                        <option value="lighten">lighten</option>
+                        <option value="color-dodge">color-dodge</option>
+                        <option value="color-burn">color-burn</option>
+                        <option value="hard-light">hard-light</option>
+                        <option value="soft-light">soft-light</option>
+                        <option value="difference">difference</option>
+                        <option value="exclusion">exclusion</option>
+                        <option value="hue">hue</option>
+                        <option value="saturation">saturation</option>
+                        <option value="color">color</option>
+                        <option value="luminosity">luminosity</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="preview-area">
+        <div id="preview-text">Preview will appear here</div>
+        <video id="preview-1" style="z-index: 0;" loop autoplay muted></video>
+        <video id="preview-2" style="z-index: 1; mix-blend-mode: screen;" loop autoplay muted></video>
+        <video id="preview-3" style="z-index: 2; mix-blend-mode: screen;" loop autoplay muted></video>
+        <video id="preview-4" style="z-index: 3; mix-blend-mode: screen;" loop autoplay muted></video>
+    </div>
+
+    <button class="project-toggle" id="project-toggle">⚙️</button>
+
+    <div class="project-controls hidden" id="project-controls">
+        <h3>Project</h3>
+        <input type="text" id="project-name" placeholder="Project name" value="My Video Project">
+        <button id="save-project">💾 Save</button>
+        <button id="load-project">📁 Load</button>
+        <button id="export-video">🎬 Export</button>
+    </div>
+
+    <script>
+        function setupDropZone(zoneEl) {
+            zoneEl.addEventListener('dragover', e => {
+                e.preventDefault();
+                zoneEl.classList.add('hover');
+            });
+            zoneEl.addEventListener('dragleave', () => {
+                zoneEl.classList.remove('hover');
+            });
+            zoneEl.addEventListener('drop', e => {
+                e.preventDefault();
+                zoneEl.classList.remove('hover');
+
+                const file = e.dataTransfer.files[0];
+                if (!file || !file.type.startsWith('video/')) {
+                    alert('Please drop a video file.');
+                    return;
+                }
+
+                let vid = zoneEl.querySelector('video');
+                if (!vid) {
+                    vid = document.createElement('video');
+                    vid.loop = true;
+                    vid.autoplay = true;
+                    vid.muted = true; // autoplay policy
+                    zoneEl.innerHTML = '';
+                    zoneEl.appendChild(vid);
+                }
+
+                vid.src = URL.createObjectURL(file);
+                vid.play();
+
+                // Update preview
+                updatePreview();
+            });
+        }
+
+        function updatePreview() {
+            const previewText = document.querySelector('#preview-text');
+            let hasVideos = false;
+
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                const previewVideo = document.querySelector(`#preview-${i}`);
+
+                if (zoneVideo && zoneVideo.src) {
+                    previewVideo.src = zoneVideo.src;
+                    previewVideo.play();
+                    hasVideos = true;
+                } else {
+                    previewVideo.src = '';
+                }
+            }
+
+            previewText.style.display = hasVideos ? 'none' : 'block';
+        }
+
+        function updateBlendMode() {
+            for (let i = 1; i <= 4; i++) {
+                const blendMode = document.getElementById(`blend-mode-${i}`).value;
+                const preview = document.querySelector(`#preview-${i}`);
+                preview.style.mixBlendMode = blendMode;
+            }
+        }
+
+        // Set up blend mode dropdowns
+        for (let i = 1; i <= 4; i++) {
+            document.getElementById(`blend-mode-${i}`).addEventListener('change', updateBlendMode);
+        }
+
+        // Set initial blend modes
+        document.getElementById('blend-mode-1').value = 'normal';
+        for (let i = 2; i <= 4; i++) {
+            document.getElementById(`blend-mode-${i}`).value = 'screen';
+        }
+        updateBlendMode();
+
+        document.querySelectorAll('.drop-zone').forEach(setupDropZone);
+
+        // Project save/load functionality
+        function saveProject() {
+            const projectName = document.getElementById('project-name').value || 'My Video Project';
+            const layers = [];
+
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                const blendMode = document.getElementById(`blend-mode-${i}`).value;
+
+                layers.push({
+                    id: i,
+                    fileName: zoneVideo && zoneVideo.src ? `layer-${i}.mp4` : null,
+                    blendMode: blendMode,
+                    hasVideo: !!(zoneVideo && zoneVideo.src)
+                });
+            }
+
+            const projectData = {
+                version: "1.0",
+                projectName: projectName,
+                createdAt: new Date().toISOString(),
+                layers: layers
+            };
+
+            const dataStr = JSON.stringify(projectData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            alert(`Project "${projectName}" saved successfully!`);
+        }
+
+        function loadProject() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const projectData = JSON.parse(e.target.result);
+
+                        document.getElementById('project-name').value = projectData.projectName || 'My Video Project';
+
+                        projectData.layers.forEach(layer => {
+                            const blendSelect = document.getElementById(`blend-mode-${layer.id}`);
+                            if (blendSelect) {
+                                blendSelect.value = layer.blendMode;
+                            }
+                        });
+
+                        updateBlendMode();
+                        alert(`Project "${projectData.projectName}" loaded successfully!\n\nNote: You'll need to re-add the video files manually.`);
+
+                    } catch (error) {
+                        alert('Error loading project: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            input.click();
+        }
+
+        function exportVideo() {
+            // Check if we have videos to export
+            let hasVideos = false;
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                if (zoneVideo && zoneVideo.src) {
+                    hasVideos = true;
+                    break;
+                }
+            }
+
+            if (!hasVideos) {
+                alert('Please add at least one video before exporting.');
+                return;
+            }
+
+            // Ask user for export quality
+            const exportType = confirm(
+                'Choose export quality:\n\n' +
+                'OK = High Quality (ProRes, Final Cut Pro ready)\n' +
+                'Cancel = Web Quality (VP9, browser compatible)\n\n' +
+                'High Quality requires server processing but provides professional-grade output.'
+            );
+
+            if (exportType) {
+                exportHighQuality();
+            } else {
+                exportWebQuality();
+            }
+        }
+
+        function exportHighQuality() {
+            // Prepare project data for server-side rendering
+            const projectData = {
+                version: "1.0",
+                projectName: document.getElementById('project-name').value || 'My Video Project',
+                createdAt: new Date().toISOString(),
+                exportSettings: {
+                    resolution: "1920x1080",
+                    frameRate: 60,
+                    codec: "prores_4444",
+                    quality: "professional"
+                },
+                layers: []
+            };
+
+            // Collect layer data with video information
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                const blendMode = document.getElementById(`blend-mode-${i}`).value;
+
+                if (zoneVideo && zoneVideo.src) {
+                    // Convert video to base64 for server processing
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = zoneVideo.videoWidth;
+                    canvas.height = zoneVideo.videoHeight;
+                    ctx.drawImage(zoneVideo, 0, 0);
+
+                    // Get video data as base64
+                    const videoData = canvas.toDataURL('image/jpeg', 0.95);
+
+                    projectData.layers.push({
+                        id: i,
+                        blendMode: blendMode,
+                        videoData: videoData,
+                        duration: zoneVideo.duration,
+                        frameRate: 30, // Assuming 30fps source
+                        hasVideo: true
+                    });
+                } else {
+                    projectData.layers.push({
+                        id: i,
+                        blendMode: blendMode,
+                        hasVideo: false
+                    });
+                }
+            }
+
+            // Show progress dialog
+            const progressDialog = document.createElement('div');
+            progressDialog.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                padding: 30px;
+                border-radius: 10px;
+                z-index: 1000;
+                text-align: center;
+                font-family: sans-serif;
+            `;
+            progressDialog.innerHTML = `
+                <h3>🔄 Processing High-Quality Export</h3>
+                <p>Rendering ProRes 4444 at 60fps...</p>
+                <p>This may take several minutes depending on video length.</p>
+                <p>Please do not close this window.</p>
+            `;
+            document.body.appendChild(progressDialog);
+
+            // Send to server for processing
+            fetch('http://localhost:8000/api/export-video', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(projectData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server processing failed');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Download the ProRes file
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${projectData.projectName.replace(/[^a-z0-9]/gi, '_')}-prores.mov`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                document.body.removeChild(progressDialog);
+                alert(`✅ High-Quality Export Complete!\n\nFormat: ProRes 4444\nResolution: 1920x1080\nFrame Rate: 60fps\nReady for Final Cut Pro!`);
+            })
+            .catch(error => {
+                document.body.removeChild(progressDialog);
+                alert(`❌ Export failed: ${error.message}\n\nFalling back to web quality export...`);
+                exportWebQuality();
+            });
+        }
+
+        function exportWebQuality() {
+            // Create canvas for recording
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Set 1080p resolution
+            canvas.width = 1920;
+            canvas.height = 1080;
+
+            // Get the longest video duration and sync all videos
+            let maxDuration = 0;
+            const videos = [];
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                if (zoneVideo && zoneVideo.src) {
+                    videos.push(zoneVideo);
+                    if (zoneVideo.duration > maxDuration) {
+                        maxDuration = zoneVideo.duration;
+                    }
+                }
+            }
+
+            if (maxDuration === 0 || maxDuration === Infinity) {
+                alert('Unable to determine video duration. Please ensure videos are loaded.');
+                return;
+            }
+
+            // Sync all videos to start
+            videos.forEach(video => {
+                video.currentTime = 0;
+                video.play();
+            });
+
+            // Try different codecs for better quality
+            const codecOptions = [
+                'video/webm;codecs=vp9',
+                'video/webm;codecs=vp8',
+                'video/mp4',
+                'video/webm'
+            ];
+
+            let selectedCodec = null;
+            for (const codec of codecOptions) {
+                if (MediaRecorder.isTypeSupported(codec)) {
+                    selectedCodec = codec;
+                    break;
+                }
+            }
+
+            if (!selectedCodec) {
+                alert('No supported video codec found. Using default.');
+                selectedCodec = 'video/webm';
+            }
+
+            // Set up MediaRecorder with 60fps
+            const stream = canvas.captureStream(60); // 60 FPS
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: selectedCodec,
+                videoBitsPerSecond: 8000000 // 8 Mbps for better quality
+            });
+
+            const chunks = [];
+            let exportStartTime = Date.now();
+
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const exportDuration = (Date.now() - exportStartTime) / 1000;
+                const blob = new Blob(chunks, { type: selectedCodec });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+
+                // Better filename with timestamp
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `video-export-${timestamp}.${selectedCodec.includes('webm') ? 'webm' : 'mp4'}`;
+                link.download = filename;
+
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                alert(`Video export completed!\n\nDuration: ${exportDuration.toFixed(1)}s\nFormat: ${selectedCodec}\nResolution: 1920x1080\nFPS: 60`);
+            };
+
+            // Start recording
+            mediaRecorder.start();
+
+            // Render frames at 60fps
+            const frameRate = 60;
+            const frameInterval = 1000 / frameRate;
+            let frameCount = 0;
+            let lastFrameTime = 0;
+
+            function renderFrame(currentTime) {
+                // Throttle to 60fps
+                if (currentTime - lastFrameTime < frameInterval) {
+                    requestAnimationFrame(renderFrame);
+                    return;
+                }
+                lastFrameTime = currentTime;
+
+                // Clear canvas
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, 1920, 1080);
+
+                // Render each video layer with blend modes
+                for (let i = 1; i <= 4; i++) {
+                    const zoneVideo = document.querySelector(`#zone-${i} video`);
+                    if (zoneVideo && zoneVideo.src) {
+                        const blendMode = document.getElementById(`blend-mode-${i}`).value;
+
+                        // Set blend mode
+                        ctx.globalCompositeOperation = blendMode;
+
+                        // Draw video frame
+                        ctx.drawImage(zoneVideo, 0, 0, 1920, 1080);
+                    }
+                }
+
+                // Reset blend mode
+                ctx.globalCompositeOperation = 'source-over';
+
+                frameCount++;
+                const elapsedSeconds = frameCount / frameRate;
+
+                // Check completion based on actual video duration
+                if (elapsedSeconds < maxDuration) {
+                    requestAnimationFrame(renderFrame);
+                } else {
+                    // Stop all videos
+                    videos.forEach(video => video.pause());
+                    mediaRecorder.stop();
+                }
+            }
+
+            // Start rendering
+            requestAnimationFrame(renderFrame);
+        }
+
+        // Set up project control buttons
+        document.getElementById('save-project').addEventListener('click', saveProject);
+        document.getElementById('load-project').addEventListener('click', loadProject);
+        document.getElementById('export-video').addEventListener('click', exportVideo);
+
+        // Toggle project controls visibility
+        document.getElementById('project-toggle').addEventListener('click', () => {
+            document.getElementById('project-controls').classList.toggle('hidden');
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,79 @@
+[project]
+name = "pulsehz-video-glitch"
+version = "1.0.0"
+description = "A desktop video glitch and blending tool with real-time preview"
+authors = [
+    {name = "PulseHZ", email = "coj@funkatron.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = ["video", "glitch", "blending", "desktop", "opencv", "pyqt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "fastapi>=0.116.0",
+    "uvicorn[standard]>=0.35.0",
+    "python-multipart>=0.0.20",
+    "pydantic>=2.11.0",
+    "opencv-python>=4.8.0",
+    "numpy<2,>=1.24.0",
+    "pillow>=11.0.0",
+    "pyqt6>=6.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+
+[project.scripts]
+pulsehz = "pulsehz.main:main"
+pulsehz-desktop = "pulsehz.main:main"
+pulsehz-server = "pulsehz.main:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/pulsehz-video-glitch"
+Repository = "https://github.com/yourusername/pulsehz-video-glitch"
+Issues = "https://github.com/yourusername/pulsehz-video-glitch/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pulsehz"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/pulsehz" = "pulsehz"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

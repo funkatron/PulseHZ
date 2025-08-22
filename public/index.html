@@ -524,7 +524,280 @@
         }
 
         function exportVideo() {
-            alert('Video export functionality coming soon!\n\nThis will render the current composition at 1080p quality.');
+            // Check if we have videos to export
+            let hasVideos = false;
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                if (zoneVideo && zoneVideo.src) {
+                    hasVideos = true;
+                    break;
+                }
+            }
+
+            if (!hasVideos) {
+                alert('Please add at least one video before exporting.');
+                return;
+            }
+
+            // Ask user for export quality
+            const exportType = confirm(
+                'Choose export quality:\n\n' +
+                'OK = High Quality (ProRes, Final Cut Pro ready)\n' +
+                'Cancel = Web Quality (VP9, browser compatible)\n\n' +
+                'High Quality requires server processing but provides professional-grade output.'
+            );
+
+            if (exportType) {
+                exportHighQuality();
+            } else {
+                exportWebQuality();
+            }
+        }
+
+        function exportHighQuality() {
+            // Prepare project data for server-side rendering
+            const projectData = {
+                version: "1.0",
+                projectName: document.getElementById('project-name').value || 'My Video Project',
+                createdAt: new Date().toISOString(),
+                exportSettings: {
+                    resolution: "1920x1080",
+                    frameRate: 60,
+                    codec: "prores_4444",
+                    quality: "professional"
+                },
+                layers: []
+            };
+
+            // Collect layer data with video information
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                const blendMode = document.getElementById(`blend-mode-${i}`).value;
+
+                if (zoneVideo && zoneVideo.src) {
+                    // Convert video to base64 for server processing
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = zoneVideo.videoWidth;
+                    canvas.height = zoneVideo.videoHeight;
+                    ctx.drawImage(zoneVideo, 0, 0);
+
+                    // Get video data as base64
+                    const videoData = canvas.toDataURL('image/jpeg', 0.95);
+
+                    projectData.layers.push({
+                        id: i,
+                        blendMode: blendMode,
+                        videoData: videoData,
+                        duration: zoneVideo.duration,
+                        frameRate: 30, // Assuming 30fps source
+                        hasVideo: true
+                    });
+                } else {
+                    projectData.layers.push({
+                        id: i,
+                        blendMode: blendMode,
+                        hasVideo: false
+                    });
+                }
+            }
+
+            // Show progress dialog
+            const progressDialog = document.createElement('div');
+            progressDialog.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                padding: 30px;
+                border-radius: 10px;
+                z-index: 1000;
+                text-align: center;
+                font-family: sans-serif;
+            `;
+            progressDialog.innerHTML = `
+                <h3>🔄 Processing High-Quality Export</h3>
+                <p>Rendering ProRes 4444 at 60fps...</p>
+                <p>This may take several minutes depending on video length.</p>
+                <p>Please do not close this window.</p>
+            `;
+            document.body.appendChild(progressDialog);
+
+            // Send to server for processing
+            fetch('http://localhost:8000/api/export-video', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(projectData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server processing failed');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Download the ProRes file
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${projectData.projectName.replace(/[^a-z0-9]/gi, '_')}-prores.mov`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                document.body.removeChild(progressDialog);
+                alert(`✅ High-Quality Export Complete!\n\nFormat: ProRes 4444\nResolution: 1920x1080\nFrame Rate: 60fps\nReady for Final Cut Pro!`);
+            })
+            .catch(error => {
+                document.body.removeChild(progressDialog);
+                alert(`❌ Export failed: ${error.message}\n\nFalling back to web quality export...`);
+                exportWebQuality();
+            });
+        }
+
+        function exportWebQuality() {
+            // Create canvas for recording
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Set 1080p resolution
+            canvas.width = 1920;
+            canvas.height = 1080;
+
+            // Get the longest video duration and sync all videos
+            let maxDuration = 0;
+            const videos = [];
+            for (let i = 1; i <= 4; i++) {
+                const zoneVideo = document.querySelector(`#zone-${i} video`);
+                if (zoneVideo && zoneVideo.src) {
+                    videos.push(zoneVideo);
+                    if (zoneVideo.duration > maxDuration) {
+                        maxDuration = zoneVideo.duration;
+                    }
+                }
+            }
+
+            if (maxDuration === 0 || maxDuration === Infinity) {
+                alert('Unable to determine video duration. Please ensure videos are loaded.');
+                return;
+            }
+
+            // Sync all videos to start
+            videos.forEach(video => {
+                video.currentTime = 0;
+                video.play();
+            });
+
+            // Try different codecs for better quality
+            const codecOptions = [
+                'video/webm;codecs=vp9',
+                'video/webm;codecs=vp8',
+                'video/mp4',
+                'video/webm'
+            ];
+
+            let selectedCodec = null;
+            for (const codec of codecOptions) {
+                if (MediaRecorder.isTypeSupported(codec)) {
+                    selectedCodec = codec;
+                    break;
+                }
+            }
+
+            if (!selectedCodec) {
+                alert('No supported video codec found. Using default.');
+                selectedCodec = 'video/webm';
+            }
+
+            // Set up MediaRecorder with 60fps
+            const stream = canvas.captureStream(60); // 60 FPS
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: selectedCodec,
+                videoBitsPerSecond: 8000000 // 8 Mbps for better quality
+            });
+
+            const chunks = [];
+            let exportStartTime = Date.now();
+
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const exportDuration = (Date.now() - exportStartTime) / 1000;
+                const blob = new Blob(chunks, { type: selectedCodec });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+
+                // Better filename with timestamp
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `video-export-${timestamp}.${selectedCodec.includes('webm') ? 'webm' : 'mp4'}`;
+                link.download = filename;
+
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                alert(`Video export completed!\n\nDuration: ${exportDuration.toFixed(1)}s\nFormat: ${selectedCodec}\nResolution: 1920x1080\nFPS: 60`);
+            };
+
+            // Start recording
+            mediaRecorder.start();
+
+            // Render frames at 60fps
+            const frameRate = 60;
+            const frameInterval = 1000 / frameRate;
+            let frameCount = 0;
+            let lastFrameTime = 0;
+
+            function renderFrame(currentTime) {
+                // Throttle to 60fps
+                if (currentTime - lastFrameTime < frameInterval) {
+                    requestAnimationFrame(renderFrame);
+                    return;
+                }
+                lastFrameTime = currentTime;
+
+                // Clear canvas
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, 1920, 1080);
+
+                // Render each video layer with blend modes
+                for (let i = 1; i <= 4; i++) {
+                    const zoneVideo = document.querySelector(`#zone-${i} video`);
+                    if (zoneVideo && zoneVideo.src) {
+                        const blendMode = document.getElementById(`blend-mode-${i}`).value;
+
+                        // Set blend mode
+                        ctx.globalCompositeOperation = blendMode;
+
+                        // Draw video frame
+                        ctx.drawImage(zoneVideo, 0, 0, 1920, 1080);
+                    }
+                }
+
+                // Reset blend mode
+                ctx.globalCompositeOperation = 'source-over';
+
+                frameCount++;
+                const elapsedSeconds = frameCount / frameRate;
+
+                // Check completion based on actual video duration
+                if (elapsedSeconds < maxDuration) {
+                    requestAnimationFrame(renderFrame);
+                } else {
+                    // Stop all videos
+                    videos.forEach(video => video.pause());
+                    mediaRecorder.stop();
+                }
+            }
+
+            // Start rendering
+            requestAnimationFrame(renderFrame);
         }
 
         // Set up project control buttons
