@@ -147,11 +147,6 @@ uv run pyinstaller --onefile --windowed desktop_app.py
 
 MIT License - see LICENSE file for details.
 
-## Support
-
-- **Issues:** [GitHub Issues](https://github.com/yourusername/pulsehz-video-glitch/issues)
-- **Email:** coj@funkatron.com
-
 ## Roadmap
 
 - [ ] GPU acceleration for video processing
