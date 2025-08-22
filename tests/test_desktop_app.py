@@ -6,10 +6,8 @@ import json
 import os
 from unittest.mock import Mock, patch
 
-# Import the desktop app
-import sys
-sys.path.append('.')
-from desktop_app import DesktopApp
+# Import the desktop app class from the package
+from pulsehz.desktop_app import DesktopApp
 
 def test_project_data_validation():
     """Test project data validation"""
@@ -80,7 +78,7 @@ def test_json_serialization():
     assert loaded_data["projectName"] == "Test Project"
     assert len(loaded_data["layers"]) == 1
 
-@patch('desktop_app.QApplication')
+@patch('pulsehz.desktop_app.QApplication')
 def test_desktop_app_initialization(mock_qapp):
     """Test desktop app initialization"""
     # Mock QApplication to avoid GUI initialization

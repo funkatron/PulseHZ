@@ -1,6 +1,5 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
@@ -26,13 +25,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
-app.mount("/", StaticFiles(directory="examples", html=True), name="static")
-
 @app.get("/")
 async def root():
-    """Serve the video blending app by default"""
-    return FileResponse("examples/test-drop-and-play.html")
+    """Root endpoint returns API metadata"""
+    return {
+        "service": "PulseHZ Video Export API",
+        "version": "1.0.0",
+        "status": "ok"
+    }
 
 # Pydantic models for type safety
 class Layer(BaseModel):
@@ -240,15 +240,14 @@ async def get_info():
 
 if __name__ == '__main__':
     print("🎬 PulseHZ Video Export API Starting...")
-    print("📁 Serving static files from: examples/")
     print("🔧 ProRes export endpoint: /api/export-video")
-    print("🌐 Access the app at: http://localhost:8000")
+    print("🌐 API at: http://localhost:8000")
     print("💡 Make sure FFmpeg is installed and in PATH")
     print("⚡ FastAPI server with optimized performance")
 
     # Run with optimized settings for better performance
     uvicorn.run(
-        "server:app",
+        "pulsehz.server:app",
         host="0.0.0.0",
         port=8000,
         reload=False,  # Disable reload for production

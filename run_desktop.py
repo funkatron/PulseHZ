@@ -1,7 +1,23 @@
+"""Thin wrapper to expose DesktopApp from package and action to run desktop."""
+
+import os
+import sys
+
+# Ensure src-based package is importable without editable install
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from pulsehz.desktop_app import DesktopApp  # re-export for tools/tests
+from pulsehz.main import run_desktop  # action entry
+
+__all__ = ["DesktopApp", "run_desktop"]
 import sys
 import os
 from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QProgressBar, QFileDialog, QMessageBox
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+try:
+    # Optional dependency: Qt WebEngine, may not be installed in CI/test envs
+    from PyQt6.QtWebEngineWidgets import QWebEngineView  # type: ignore
+except Exception:  # pragma: no cover - tests patch QApplication and do not use web view
+    QWebEngineView = None  # type: ignore
 from PyQt6.QtCore import QUrl, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon
 import subprocess
@@ -102,8 +118,9 @@ class DesktopApp(QMainWindow):
         layout = QVBoxLayout(central_widget)
 
         # Create web view
-        self.web_view = QWebEngineView()
-        layout.addWidget(self.web_view)
+        self.web_view = QWebEngineView() if QWebEngineView is not None else None
+        if self.web_view is not None:
+            layout.addWidget(self.web_view)
 
         # Create control panel
         control_panel = QWidget()
@@ -132,9 +149,11 @@ class DesktopApp(QMainWindow):
         layout.addWidget(control_panel)
 
         # Load the web interface - use local server for better performance
-        self.web_view.setUrl(QUrl("http://localhost:8000"))
+        if self.web_view is not None:
+            self.web_view.setUrl(QUrl("http://localhost:8000"))
 
-        self.web_view.page().javaScriptConsoleMessage.connect(self.handle_console_message)
+        if self.web_view is not None:
+            self.web_view.page().javaScriptConsoleMessage.connect(self.handle_console_message)
         self.video_processor = None
 
         # On startup, ensure server is running
@@ -214,7 +233,8 @@ class DesktopApp(QMainWindow):
         js_code = f"""
         document.getElementById('project-name').value = '{project_data.get('projectName', 'My Video Project')}';
         """
-        self.web_view.page().runJavaScript(js_code)
+        if self.web_view is not None:
+            self.web_view.page().runJavaScript(js_code)
 
         # Set blend modes
         for layer in project_data.get('layers', []):
@@ -223,10 +243,12 @@ class DesktopApp(QMainWindow):
             js_code = f"""
             document.getElementById('blend-mode-{layer_id}').value = '{blend_mode}';
             """
-            self.web_view.page().runJavaScript(js_code)
+            if self.web_view is not None:
+                self.web_view.page().runJavaScript(js_code)
 
         # Update blend modes in preview
-        self.web_view.page().runJavaScript("updateBlendMode();")
+        if self.web_view is not None:
+            self.web_view.page().runJavaScript("updateBlendMode();")
 
     def reload_video_files(self):
         """Prompt user to reload video files for the loaded project"""
@@ -291,7 +313,8 @@ class DesktopApp(QMainWindow):
         }})();
         """
 
-        self.web_view.page().runJavaScript(js_code)
+        if self.web_view is not None:
+            self.web_view.page().runJavaScript(js_code)
 
     def export_video(self):
         """Export video using the web interface data"""
@@ -336,7 +359,8 @@ class DesktopApp(QMainWindow):
         })();
         """
 
-        self.web_view.page().runJavaScript(js_code, self.handle_project_data)
+        if self.web_view is not None:
+            self.web_view.page().runJavaScript(js_code, self.handle_project_data)
 
     def handle_project_data(self, result):
         """Handle project data from web interface"""

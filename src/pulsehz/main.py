@@ -70,5 +70,33 @@ def main():
             access_log=True
         )
 
+def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+    """Action: run the FastAPI server."""
+    print("🎬 Starting PulseHZ Video Glitch Tool (Server Mode)")
+    print(f"🌐 Server will be available at http://{host}:{port}")
+    print("💡 Make sure FFmpeg is installed and in PATH")
+
+    uvicorn.run(
+        "pulsehz.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        access_log=True
+    )
+
+def run_desktop() -> None:
+    """Action: run the desktop app."""
+    print("🎬 Starting PulseHZ Video Glitch Tool (Desktop Mode)")
+    print("📁 Loading desktop application...")
+
+    from PyQt6.QtWidgets import QApplication
+    import sys as _sys
+
+    qapp = QApplication(_sys.argv)
+    window = DesktopApp()
+    window.show()
+    print("✅ Desktop app started successfully!")
+    _sys.exit(qapp.exec())
+
 if __name__ == "__main__":
     main()

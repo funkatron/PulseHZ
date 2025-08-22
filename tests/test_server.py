@@ -6,10 +6,8 @@ import tempfile
 import os
 import json
 
-# Import the app from server.py
-import sys
-sys.path.append('.')
-from server import app
+# Import the app from the package
+from pulsehz.server import app
 
 client = TestClient(app)
 
@@ -30,11 +28,13 @@ def test_info_endpoint():
     assert "capabilities" in data
     assert "performance" in data
 
-def test_root_endpoint():
-    """Test the root endpoint serves the web interface"""
+def test_root_endpoint_returns_json():
+    """Root endpoint should return API metadata JSON"""
     response = client.get("/")
     assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
+    data = response.json()
+    assert data["service"] == "PulseHZ Video Export API"
+    assert data["status"] == "ok"
 
 def test_export_video_no_data():
     """Test export endpoint with no video data"""

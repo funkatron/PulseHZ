@@ -33,15 +33,22 @@ A desktop video glitch and blending tool with real-time preview, built with Pyth
    uv sync
    ```
 
-3. **Run the desktop app:**
+3. **Run the web interface (static):**
    ```bash
-   uv run python desktop_app.py
+   npx --yes live-server public --port=5500 --no-browser
+   # Open http://127.0.0.1:5500
    ```
 
-   Or run the web interface:
+4. **Run the API server (optional):**
    ```bash
-   uv run python server.py
-   # Then open http://localhost:8000 in your browser
+   uv run pulsehz-server
+   # API: http://localhost:8000
+   # Health: http://localhost:8000/api/health
+   ```
+
+5. **Run the desktop app (optional):**
+   ```bash
+   uv run pulsehz-desktop
    ```
 
 ## Usage
@@ -58,11 +65,13 @@ The desktop app provides a full-featured interface:
 
 ### Web Interface
 
-The web interface runs on `http://localhost:8000` and provides:
+The web interface is served statically from `public/` (via Live Server) and provides:
 
 - Real-time preview of video blending
 - Project management
 - Direct video export
+
+Note: The API does not serve static files. Use a static server (e.g., Live Server) for `public/`.
 
 ## Development
 
@@ -86,12 +95,13 @@ uv run flake8
 
 ```
 pulsehz-video-glitch/
-├── src/pulsehz/           # Main package
-├── examples/              # Web interface files
+├── public/                # Static web UI (served via Live Server)
+├── src/pulsehz/           # Main Python package
 ├── tests/                 # Test files
-├── pyproject.toml        # Project configuration
-├── README.md             # This file
-└── desktop_app.py        # Desktop application
+├── run_server.py          # Thin wrapper to run server (optional)
+├── run_desktop.py         # Thin wrapper to run desktop (optional)
+├── pyproject.toml         # Project configuration
+└── README.md              # This file
 ```
 
 ## Dependencies
