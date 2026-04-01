@@ -1,3 +1,28 @@
-/node_modules/
-/.vscode/
-/.idea/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# Env/OS
+.venv/
+.env
+.DS_Store
+
+# Editor
+.vscode/
+
+# Node
+node_modules/
+
+# Coverage/pytest
+.coverage
+.pytest_cache/
+
+# Build
+build/
+dist/
+

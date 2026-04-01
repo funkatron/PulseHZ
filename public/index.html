@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PulseHZ</title>
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="panel sidebar">
+            <section class="section">
+                <h1>PulseHZ</h1>
+                <div class="muted">Browser-first layered playback with audio-driven one-bar looping.</div>
+            </section>
+
+            <section class="section">
+                <label class="muted" for="project-name">Project Name</label>
+                <input id="project-name" class="input" type="text" value="Browser First MVP" />
+            </section>
+
+            <section class="section">
+                <h2>Transport</h2>
+                <div class="button-row">
+                    <button id="play-button" class="button button-accent" type="button">Play</button>
+                    <button id="pause-button" class="button" type="button">Pause</button>
+                </div>
+                <div class="button-row">
+                    <button id="export-high-button" class="button button-accent" type="button">Export ProRes</button>
+                    <button id="export-web-button" class="button" type="button">Export WebM</button>
+                </div>
+            </section>
+
+            <section class="section">
+                <h2>Audio</h2>
+                <input id="audio-input" class="input" type="file" accept="audio/*" />
+                <audio id="audio-element" class="hidden" controls></audio>
+                <div class="button-row">
+                    <button id="detect-bpm-button" class="button" type="button">Detect BPM</button>
+                    <button id="clear-audio-button" class="button button-danger" type="button">Clear Audio</button>
+                </div>
+                <label class="muted" for="manual-bpm">Manual BPM</label>
+                <input id="manual-bpm" class="input" type="number" min="40" max="220" step="0.1" value="120" />
+                <div class="stat-grid">
+                    <div class="stat">
+                        <div class="stat-label">Detected BPM</div>
+                        <div id="detected-bpm" class="stat-value">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Bar Length</div>
+                        <div id="bar-duration" class="stat-value">2.00s</div>
+                    </div>
+                </div>
+                <div class="muted">Realtime level</div>
+                <div class="meter"><div id="meter-bar" class="meter-bar"></div></div>
+            </section>
+
+            <section class="section">
+                <h2>Status</h2>
+                <div class="stat-grid">
+                    <div class="stat">
+                        <div class="stat-label">Current Beat</div>
+                        <div id="current-beat" class="stat-value">1.00</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Loaded Layers</div>
+                        <div id="loaded-layers" class="stat-value">0 / 4</div>
+                    </div>
+                </div>
+                <div class="muted">Bar progress</div>
+                <div class="transport-progress"><div id="transport-progress-bar" class="transport-progress-bar"></div></div>
+                <div id="status-line" class="status-line">Drop a few videos and an audio track to get started.</div>
+            </section>
+        </aside>
+
+        <main class="workspace">
+            <section class="panel preview-panel">
+                <canvas id="preview-canvas" class="preview-canvas" width="1920" height="1080"></canvas>
+                <div id="preview-status" class="preview-status">Drop video clips into the layer slots to build a live composite.</div>
+                <div class="preview-overlay">
+                    <div id="preview-output-label" class="preview-pill">Single canvas output, ready for captureStream()</div>
+                    <div id="preview-transport-label" class="preview-pill">Stopped</div>
+                </div>
+            </section>
+
+            <section id="layers-grid" class="layers-grid"></section>
+        </main>
+    </div>
+
+    <script type="module" src="./app.js?v=20260212"></script>
+</body>
+</html>
