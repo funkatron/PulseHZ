@@ -44,6 +44,10 @@ dev = [
     "black>=23.0.0",
     "flake8>=6.0.0",
 ]
+audio = [
+    "librosa>=0.10.2",
+    "soundfile>=0.12.1",
+]
 
 [project.scripts]
 pulsehz = "pulsehz.main:main"

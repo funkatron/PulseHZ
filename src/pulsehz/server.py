@@ -5,14 +5,14 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.background import BackgroundTask
 
 from pulsehz.rendering import (
@@ -23,6 +23,7 @@ from pulsehz.rendering import (
     parse_resolution,
 )
 from pulsehz.constants import DEFAULT_LISTEN_PORT
+from pulsehz.project_controls import ProjectControls
 from pulsehz.timing import bar_duration_seconds
 
 APP_DIR = Path(__file__).resolve().parents[2]
@@ -56,6 +57,16 @@ class LayerMetadata(BaseModel):
     hasVideo: bool = False
     sourceName: Optional[str] = None
     sourceDurationSeconds: Optional[float] = None
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+    """How many bars one full clip loop spans at the transport tempo (preview + FFmpeg setpts)."""
+    barsPerLoop: int = Field(default=1, ge=1, le=4)
+
+    @field_validator("barsPerLoop")
+    @classmethod
+    def bars_per_loop_allowed(cls, value: int) -> int:
+        if value in (1, 2, 4):
+            return value
+        return 1
 
 
 class TransportSettings(BaseModel):
@@ -70,6 +81,7 @@ class ExportSettings(BaseModel):
     frameRate: int = 60
     codec: str = "prores_4444"
     quality: str = "professional"
+    backdrop: Literal["black", "white", "transparent"] = "transparent"
 
 
 class ProjectMetadata(BaseModel):
@@ -79,6 +91,7 @@ class ProjectMetadata(BaseModel):
     exportSettings: ExportSettings = ExportSettings()
     transport: TransportSettings = TransportSettings()
     layers: List[LayerMetadata]
+    controls: Optional[ProjectControls] = None
 
 
 def _cleanup_dir(path: str) -> None:
@@ -129,6 +142,7 @@ def _build_ffmpeg_command(
         metadata.transport.bpm, metadata.transport.beatsPerBar
     )
     video_layers = iter_video_layers([layer.model_dump() for layer in metadata.layers])
+    backdrop = metadata.exportSettings.backdrop
     filter_complex = build_filter_complex(
         layers=video_layers,
         width=width,
@@ -136,15 +150,27 @@ def _build_ffmpeg_command(
         frame_rate=frame_rate,
         bar_duration_seconds=bar_duration,
         render_duration_seconds=render_duration,
+        backdrop=backdrop,
     )
 
+    video_input_offset = 1 if backdrop in ("black", "white") else 0
     command: list[str] = ["ffmpeg", "-y"]
+    if video_input_offset:
+        command.extend(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={backdrop}:s={width}x{height}:r={frame_rate}:d={render_duration:.6f}",
+            ]
+        )
     for path in video_paths:
         command.extend(["-stream_loop", "-1", "-i", path])
 
     if audio_path:
         command.extend(["-i", audio_path])
 
+    video_pix_fmt = "yuva444p10le" if backdrop == "transparent" else "yuv444p10le"
     command.extend(
         [
             "-filter_complex",
@@ -156,12 +182,13 @@ def _build_ffmpeg_command(
             "-profile:v",
             "4",
             "-pix_fmt",
-            "yuv444p10le",
+            video_pix_fmt,
         ]
     )
 
     if audio_path:
-        command.extend(["-map", f"{len(video_paths)}:a", "-c:a", "aac", "-shortest"])
+        audio_input_index = len(video_paths) + video_input_offset
+        command.extend(["-map", f"{audio_input_index}:a", "-c:a", "aac", "-shortest"])
     else:
         command.extend(["-t", f"{render_duration:.6f}"])
 
@@ -279,8 +306,26 @@ async def get_info():
         "name": "PulseHZ Video Export API",
         "version": "1.0.0",
         "capabilities": {
-            "formats": ["ProRes 4444", "ProRes 422", "H.264"],
-            "resolutions": ["1920x1080", "3840x2160"],
+            "formats": ["ProRes 4444 (yuv444p10le)", "ProRes 4444+alpha (yuva444p10le)", "ProRes 422", "H.264"],
+            "resolutions": [
+                "1280x720",
+                "1920x1080",
+                "3840x2160",
+                "720x1280",
+                "1080x1920",
+                "2160x3840",
+                "1680x720",
+                "2520x1080",
+                "5040x2160",
+                "720x1680",
+                "1080x2520",
+                "2160x5040",
+                "720x720",
+                "1080x1080",
+                "2160x2160",
+                "720x1720",
+                "1440x3440",
+            ],
             "frameRates": [24, 30, 60],
             "blendModes": SUPPORTED_BLEND_MODES,
         },

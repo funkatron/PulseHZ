@@ -1,5 +1,91 @@
+import { createEmptyControlsPayload } from "./control-model.js?v=20260412";
+import { resolveModulatedLayerOpacity } from "./modulation-runtime.js?v=20260412";
+import { emit, EVT_TRANSPORT_BPM_CHANGED } from "./app-events.js?v=20260412";
+
 const MAX_LAYERS = 4;
 const DEFAULT_BPM = 120;
+
+/**
+ * HTMLMediaElement.playbackRate range is engine-specific (Chromium often ~0.0625–16; some WebViews lower).
+ * Long clips need high desired rates; we clamp + walk down until the assignment sticks or we give up.
+ */
+const MEDIA_PLAYBACK_RATE_MIN = 0.0625;
+const MEDIA_PLAYBACK_RATE_MAX = 16;
+/** Descending steps tried after the ideal clamp (handles stricter embeds / WebKit caps). */
+const PLAYBACK_RATE_FALLBACK_STEPS = [
+  16, 12, 10, 8, 6, 4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25, 0.125, MEDIA_PLAYBACK_RATE_MIN,
+];
+
+/** @typedef {"black" | "white" | "transparent"} BackdropKind */
+const BACKDROP_OPTIONS = /** @type {const} */ (["black", "white", "transparent"]);
+
+/** Vertical resolution for 720p / 1080p / 2160p tiers (16∶9 height). */
+const OUTPUT_TIER_HEIGHT = {
+  "720p": 720,
+  "1080p": 1080,
+  "2160p": 2160,
+};
+
+const OUTPUT_FIXED_PRESETS = {
+  "720x1720": { width: 720, height: 1720 },
+  "1440x3440": { width: 1440, height: 3440 },
+};
+
+/**
+ * Pixel size for the main canvas and ProRes export metadata.
+ * Layers are drawn with uniform scale and center crop to this frame.
+ */
+function getOutputDimensions(tierId, aspectId) {
+  const fixed = OUTPUT_FIXED_PRESETS[tierId];
+  if (fixed) {
+    return { ...fixed };
+  }
+
+  const h0 = OUTPUT_TIER_HEIGHT[tierId];
+  if (!h0) {
+    return { width: 1920, height: 1080 };
+  }
+
+  if (aspectId === "16:9") {
+    if (tierId === "720p") {
+      return { width: 1280, height: 720 };
+    }
+    if (tierId === "1080p") {
+      return { width: 1920, height: 1080 };
+    }
+    return { width: 3840, height: 2160 };
+  }
+
+  if (aspectId === "9:16") {
+    if (tierId === "720p") {
+      return { width: 720, height: 1280 };
+    }
+    if (tierId === "1080p") {
+      return { width: 1080, height: 1920 };
+    }
+    return { width: 2160, height: 3840 };
+  }
+
+  if (aspectId === "21:9") {
+    const height = h0;
+    const width = Math.round((height * 21) / 9);
+    return { width, height };
+  }
+
+  if (aspectId === "9:21") {
+    const width = h0;
+    const height = Math.round((width * 21) / 9);
+    return { width, height };
+  }
+
+  if (aspectId === "1:1") {
+    const side = h0;
+    return { width: side, height: side };
+  }
+
+  return { width: 1920, height: 1080 };
+}
+
 const SUPPORTED_BLEND_MODES = [
   "normal",
   "multiply",
@@ -146,28 +232,256 @@ async function transcodeVideoForPreview(file) {
   return res.blob();
 }
 
+/**
+ * @param {unknown} value
+ * @returns {1 | 2 | 4}
+ */
+function normalizeBarsPerLoop(value) {
+  const n = Number(value);
+  if (n === 2 || n === 4) {
+    return n;
+  }
+  return 1;
+}
+
+/**
+ * Guess whether a clip is written as one bar, two bars, or four at the current tempo.
+ * @param {number} durationSeconds
+ * @param {number} barSeconds
+ * @returns {1 | 2 | 4}
+ */
+function inferBarsPerLoopFromDuration(durationSeconds, barSeconds) {
+  if (
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0 ||
+    !Number.isFinite(barSeconds) ||
+    barSeconds <= 0
+  ) {
+    return 1;
+  }
+  /** @type {(1 | 2 | 4)[]} */
+  const candidates = [1, 2, 4];
+  let best = 1;
+  let bestErr = Infinity;
+  for (const k of candidates) {
+    const target = k * barSeconds;
+    const err = Math.abs(durationSeconds - target) / target;
+    if (err < bestErr - 1e-9) {
+      bestErr = err;
+      best = k;
+    } else if (Math.abs(err - bestErr) <= 1e-9 && k < best) {
+      best = k;
+    }
+  }
+  return best;
+}
+
+/**
+ * Recompute 1/2/4-bar guess for every loaded layer when tempo changes, unless the user locked "Clip loop".
+ */
+function refreshBarsPerLoopFromTempoForAutoLayers() {
+  const barSec = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
+  let changed = false;
+  for (const layer of state.layers) {
+    if (!layer.file || !layer.duration || !layer.ready || layer.barsPerLoopLocked) {
+      continue;
+    }
+    const next = inferBarsPerLoopFromDuration(layer.duration, barSec);
+    if (next !== layer.barsPerLoop) {
+      layer.barsPerLoop = next;
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderLayers();
+  }
+}
+
+/**
+ * Single path after the musical tempo changes: layer loop inference, rates, sync, UI, then bus emit.
+ * @param {number} nextBpm
+ * @param {string} source e.g. manual-input | detect-file | detect-live | live-estimator
+ */
+function commitTransportBpm(nextBpm, source) {
+  if (!Number.isFinite(nextBpm) || nextBpm <= 0) {
+    return;
+  }
+  const previousBpm = state.playback.bpm;
+  if (Math.abs(nextBpm - previousBpm) < 1e-6) {
+    return;
+  }
+  state.playback.bpm = nextBpm;
+  elements.manualBpm.value = nextBpm.toFixed(1);
+  refreshBarsPerLoopFromTempoForAutoLayers();
+  applyPlaybackRates();
+  updateTransportDisplays(getTransportSeconds());
+  if (state.playback.isPlaying) {
+    syncLayerVideos(getTransportSeconds());
+  }
+  if (state.playback.isPlaying && state.autoDemo.grid !== "off") {
+    syncAutoDemoAnchors(getTransportSeconds());
+  }
+  drawPreview(getTransportSeconds());
+  emit(EVT_TRANSPORT_BPM_CHANGED, {
+    bpm: nextBpm,
+    previousBpm,
+    source,
+  });
+}
+
 function barDurationSeconds(bpm, beatsPerBar = 4) {
   return (60 / bpm) * beatsPerBar;
+}
+
+/** Onset + beat-interval BPM estimator (~60fps) while live capture is active. */
+const realtimeBpmEstimator = {
+  prevRms: 0,
+  onsetHistory: [],
+  lastBeatMs: 0,
+  beatTimes: [],
+  smoothedBpm: null,
+  lastApplyMs: 0,
+};
+
+function medianSortedCopy(values) {
+  if (!values.length) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function resetRealtimeBpmEstimator({ clearDetected = false } = {}) {
+  realtimeBpmEstimator.prevRms = 0;
+  realtimeBpmEstimator.onsetHistory.length = 0;
+  realtimeBpmEstimator.lastBeatMs = 0;
+  realtimeBpmEstimator.beatTimes.length = 0;
+  realtimeBpmEstimator.smoothedBpm = null;
+  realtimeBpmEstimator.lastApplyMs = 0;
+  if (clearDetected) {
+    state.playback.detectedBpm = null;
+  }
+}
+
+/**
+ * Cheap RMS onset peaks → beat times → median interval → smoothed BPM.
+ * Drives transport BPM + layer rates (throttled) for loopback / live use.
+ */
+function updateRealtimeBpmFromLive() {
+  if (!state.liveInput.active || !state.analyserNode || state.audioAnalysisInFlight) {
+    return;
+  }
+
+  const analyzer = state.analyserNode;
+  const timeData = new Float32Array(analyzer.fftSize);
+  analyzer.getFloatTimeDomainData(timeData);
+
+  let sumSquares = 0;
+  for (let i = 0; i < timeData.length; i += 1) {
+    sumSquares += timeData[i] * timeData[i];
+  }
+  const rms = Math.sqrt(sumSquares / timeData.length);
+
+  const prev = realtimeBpmEstimator.prevRms;
+  const flux = Math.max(0, rms - prev);
+  realtimeBpmEstimator.prevRms = rms * 0.18 + prev * 0.82;
+
+  const history = realtimeBpmEstimator.onsetHistory;
+  history.push(flux);
+  if (history.length > 52) {
+    history.shift();
+  }
+  if (history.length < 12) {
+    return;
+  }
+
+  const floor = medianSortedCopy(history);
+  const threshold = floor * 2.75 + 0.022;
+
+  const now = performance.now();
+  if (flux > threshold && now - realtimeBpmEstimator.lastBeatMs > 250) {
+    realtimeBpmEstimator.lastBeatMs = now;
+    const beats = realtimeBpmEstimator.beatTimes;
+    beats.push(now);
+    if (beats.length > 20) {
+      beats.shift();
+    }
+  }
+
+  const beats = realtimeBpmEstimator.beatTimes;
+  if (beats.length < 4) {
+    return;
+  }
+
+  const intervals = [];
+  for (let i = 1; i < beats.length; i += 1) {
+    const gap = beats[i] - beats[i - 1];
+    if (gap > 280 && gap < 1600) {
+      intervals.push(gap);
+    }
+  }
+  if (intervals.length < 3) {
+    return;
+  }
+
+  let bpm = 60000 / medianSortedCopy(intervals);
+  bpm = normalizeBpm(bpm);
+  bpm = Math.max(58, Math.min(200, bpm));
+
+  const prevSmooth = realtimeBpmEstimator.smoothedBpm;
+  realtimeBpmEstimator.smoothedBpm =
+    prevSmooth == null ? bpm : prevSmooth * 0.78 + bpm * 0.22;
+  state.playback.detectedBpm = realtimeBpmEstimator.smoothedBpm;
+
+  if (now - realtimeBpmEstimator.lastApplyMs < 140) {
+    return;
+  }
+  realtimeBpmEstimator.lastApplyMs = now;
+
+  const rounded = Math.round(realtimeBpmEstimator.smoothedBpm * 10) / 10;
+  if (Math.abs(rounded - state.playback.bpm) < 0.15) {
+    return;
+  }
+
+  commitTransportBpm(rounded, "live-estimator");
 }
 
 function createLayerState(id) {
   return {
     id,
     blendMode: id === 1 ? "normal" : "screen",
+    opacity: 1,
     file: null,
     objectUrl: "",
     video: document.createElement("video"),
     duration: 0,
     ready: false,
+    /** @type {1 | 2 | 4} */
+    barsPerLoop: 1,
+    /** If true, "Clip loop" was chosen manually and tempo changes won't re-infer. */
+    barsPerLoopLocked: false,
   };
 }
 
 const state = {
+  /** @type {{ schemaVersion: number, modulation: unknown[], midi: unknown[] }} */
+  controls: createEmptyControlsPayload(),
+  output: {
+    tier: "1080p",
+    aspect: "16:9",
+    backdrop: /** @type {BackdropKind} */ ("black"),
+  },
   audioContext: null,
-  audioSourceNode: null,
+  mediaElementSource: null,
+  liveStreamSource: null,
+  liveInput: {
+    active: false,
+    stream: null,
+  },
   analyserNode: null,
   exportAudioDestination: null,
   animationFrameId: null,
+  idleMeterFrameId: null,
   audioAnalysisInFlight: false,
   layers: Array.from({ length: MAX_LAYERS }, (_, index) => createLayerState(index + 1)),
   playback: {
@@ -184,6 +498,13 @@ const state = {
     objectUrl: "",
     duration: 0,
   },
+  /** Editor-only: discrete steps on musical grid. Not serialized to export metadata. */
+  autoDemo: {
+    /** @type {"off" | "beat" | "bar" | "both"} */
+    grid: "off",
+    _lastBar: /** @type {number | null} */ (null),
+    _lastBeat: /** @type {number | null} */ (null),
+  },
 };
 
 const elements = {
@@ -192,6 +513,9 @@ const elements = {
   audioElement: document.getElementById("audio-element"),
   detectBpmButton: document.getElementById("detect-bpm-button"),
   clearAudioButton: document.getElementById("clear-audio-button"),
+  liveAudioButton: document.getElementById("live-audio-button"),
+  audioDeviceSelect: document.getElementById("audio-device-select"),
+  refreshAudioDevicesButton: document.getElementById("refresh-audio-devices-button"),
   manualBpm: document.getElementById("manual-bpm"),
   currentBeat: document.getElementById("current-beat"),
   detectedBpm: document.getElementById("detected-bpm"),
@@ -209,9 +533,36 @@ const elements = {
   pauseButton: document.getElementById("pause-button"),
   exportHighButton: document.getElementById("export-high-button"),
   exportWebButton: document.getElementById("export-web-button"),
+  outputTierSelect: document.getElementById("output-tier-select"),
+  outputAspectSelect: document.getElementById("output-aspect-select"),
+  outputDimensionsLabel: document.getElementById("output-dimensions-label"),
+  previewCanvasWrap: document.getElementById("preview-canvas-wrap"),
+  outputBackdropSelect: document.getElementById("output-backdrop-select"),
+  demoLfoOpacityButton: document.getElementById("demo-lfo-opacity-button"),
+  autoDemoGridSelect: document.getElementById("auto-demo-grid-select"),
 };
 
-const previewContext = elements.previewCanvas.getContext("2d");
+const previewContext =
+  elements.previewCanvas.getContext("2d", { alpha: true, desynchronized: true }) ??
+  elements.previewCanvas.getContext("2d", { alpha: true }) ??
+  elements.previewCanvas.getContext("2d");
+
+/** Offscreen buffer for compositing; `drawImage(<video>)` + blend mode is unreliable in some engines. */
+let layerScratchCanvas = null;
+let layerScratchContext = null;
+
+function ensureLayerScratch(cw, ch) {
+  if (!layerScratchCanvas || layerScratchCanvas.width !== cw || layerScratchCanvas.height !== ch) {
+    layerScratchCanvas = document.createElement("canvas");
+    layerScratchCanvas.width = cw;
+    layerScratchCanvas.height = ch;
+    layerScratchContext =
+      layerScratchCanvas.getContext("2d", { alpha: true, desynchronized: true }) ??
+      layerScratchCanvas.getContext("2d", { alpha: true }) ??
+      layerScratchCanvas.getContext("2d");
+  }
+  return layerScratchContext;
+}
 
 function setStatus(message, { error = false } = {}) {
   elements.statusLine.textContent = message;
@@ -249,7 +600,108 @@ function getTransportSeconds() {
   return state.playback.startOffsetSeconds + elapsed;
 }
 
-function ensureAudioGraph() {
+/** All layers with a ready clip (auto-demo steps each row; index uses layer id as offset). */
+function activeLoadedLayers() {
+  return state.layers.filter((layer) => layer.file && layer.ready);
+}
+
+const AUTO_DEMO_BLEND_CYCLE = [
+  "normal",
+  "screen",
+  "multiply",
+  "overlay",
+  "difference",
+  "color-dodge",
+];
+
+const AUTO_DEMO_OPACITY_STEPS = [1, 0.78, 0.52, 0.9, 0.66];
+
+function syncAutoDemoAnchors(transportSeconds) {
+  const barSec = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
+  if (barSec <= 0) {
+    return;
+  }
+  const beatDur = barSec / state.playback.beatsPerBar;
+  state.autoDemo._lastBar = Math.floor(transportSeconds / barSec);
+  state.autoDemo._lastBeat = Math.floor(transportSeconds / beatDur);
+}
+
+function autoDemoOnBeat(globalBeatIndex) {
+  const layers = activeLoadedLayers();
+  if (!layers.length) {
+    return;
+  }
+  const len = AUTO_DEMO_BLEND_CYCLE.length;
+  for (const layer of layers) {
+    const idx = ((globalBeatIndex + layer.id) % len + len) % len;
+    layer.blendMode = AUTO_DEMO_BLEND_CYCLE[idx];
+  }
+  renderLayers();
+}
+
+function autoDemoOnBar(barIndex) {
+  const layers = activeLoadedLayers();
+  if (!layers.length) {
+    return;
+  }
+  const len = AUTO_DEMO_OPACITY_STEPS.length;
+  for (const layer of layers) {
+    const idx = ((barIndex + layer.id) % len + len) % len;
+    layer.opacity = AUTO_DEMO_OPACITY_STEPS[idx];
+  }
+  renderLayers();
+}
+
+function applyAutoDemo(transportSeconds) {
+  const ad = state.autoDemo;
+  if (ad.grid === "off" || !state.playback.isPlaying) {
+    return;
+  }
+  const barSec = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
+  if (barSec <= 0) {
+    return;
+  }
+  const beatDur = barSec / state.playback.beatsPerBar;
+  const currentBar = Math.floor(transportSeconds / barSec);
+  const currentBeatGlobal = Math.floor(transportSeconds / beatDur);
+
+  if (ad._lastBar === null || ad._lastBeat === null) {
+    syncAutoDemoAnchors(transportSeconds);
+    return;
+  }
+
+  const barChanged = ad._lastBar !== currentBar;
+  const beatChanged = ad._lastBeat !== currentBeatGlobal;
+  if (barChanged) {
+    ad._lastBar = currentBar;
+  }
+  if (beatChanged) {
+    ad._lastBeat = currentBeatGlobal;
+  }
+
+  if ((ad.grid === "bar" || ad.grid === "both") && barChanged) {
+    autoDemoOnBar(currentBar);
+  }
+  if ((ad.grid === "beat" || ad.grid === "both") && beatChanged) {
+    autoDemoOnBeat(currentBeatGlobal);
+  }
+}
+
+function handleAutoDemoGridChange() {
+  const raw = elements.autoDemoGridSelect?.value ?? "off";
+  const allowed = ["off", "beat", "bar", "both"];
+  state.autoDemo.grid = allowed.includes(raw) ? raw : "off";
+  state.autoDemo._lastBar = null;
+  state.autoDemo._lastBeat = null;
+  if (state.playback.isPlaying && state.autoDemo.grid !== "off") {
+    syncAutoDemoAnchors(getTransportSeconds());
+  }
+  if (elements.autoDemoGridSelect) {
+    elements.autoDemoGridSelect.value = state.autoDemo.grid;
+  }
+}
+
+function ensureAudioBase() {
   if (state.audioContext) {
     return;
   }
@@ -264,16 +716,240 @@ function ensureAudioGraph() {
   state.analyserNode = state.audioContext.createAnalyser();
   state.analyserNode.fftSize = 1024;
   state.exportAudioDestination = state.audioContext.createMediaStreamDestination();
-  state.audioSourceNode = state.audioContext.createMediaElementSource(elements.audioElement);
-  state.audioSourceNode.connect(state.analyserNode);
-  state.audioSourceNode.connect(state.audioContext.destination);
-  state.audioSourceNode.connect(state.exportAudioDestination);
+}
+
+function stopIdleLiveMeter() {
+  cancelAnimationFrame(state.idleMeterFrameId);
+  state.idleMeterFrameId = null;
+}
+
+function tickIdleLiveMeter() {
+  updateAudioMeter();
+  if (state.liveInput.active && !state.playback.isPlaying) {
+    state.idleMeterFrameId = requestAnimationFrame(tickIdleLiveMeter);
+  }
+}
+
+function startIdleLiveMeter() {
+  stopIdleLiveMeter();
+  if (state.liveInput.active && !state.playback.isPlaying) {
+    state.idleMeterFrameId = requestAnimationFrame(tickIdleLiveMeter);
+  }
+}
+
+function syncLiveAudioButton() {
+  if (!elements.liveAudioButton) {
+    return;
+  }
+  elements.liveAudioButton.textContent = state.liveInput.active ? "Stop live capture" : "Live capture";
+  elements.liveAudioButton.classList.toggle("button-accent", state.liveInput.active);
+}
+
+function stopLiveStreamsOnly() {
+  if (state.liveInput.stream) {
+    for (const track of state.liveInput.stream.getTracks()) {
+      track.stop();
+    }
+  }
+  state.liveInput.stream = null;
+  if (state.liveStreamSource) {
+    try {
+      state.liveStreamSource.disconnect();
+    } catch (_) {
+      /* ignore */
+    }
+    state.liveStreamSource = null;
+  }
+  state.liveInput.active = false;
+  stopIdleLiveMeter();
+  syncLiveAudioButton();
+  resetRealtimeBpmEstimator();
+}
+
+function connectFileSources() {
+  ensureAudioBase();
+  if (!state.audioContext) {
+    return;
+  }
+
+  stopLiveStreamsOnly();
+
+  if (state.mediaElementSource) {
+    try {
+      state.mediaElementSource.disconnect();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  if (!state.audio.file) {
+    return;
+  }
+
+  if (!state.mediaElementSource) {
+    state.mediaElementSource = state.audioContext.createMediaElementSource(elements.audioElement);
+  }
+  state.mediaElementSource.connect(state.analyserNode);
+  state.mediaElementSource.connect(state.exportAudioDestination);
+  state.mediaElementSource.connect(state.audioContext.destination);
 }
 
 async function resumeAudioContext() {
-  ensureAudioGraph();
+  ensureAudioBase();
   if (state.audioContext && state.audioContext.state === "suspended") {
     await state.audioContext.resume();
+  }
+}
+
+async function refreshAudioInputDevices() {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return;
+  }
+  const select = elements.audioDeviceSelect;
+  if (!select) {
+    return;
+  }
+  const previous = select.value;
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const inputs = devices.filter((d) => d.kind === "audioinput");
+  select.innerHTML = "";
+  const defaultOpt = document.createElement("option");
+  defaultOpt.value = "";
+  defaultOpt.textContent = "Default input";
+  select.appendChild(defaultOpt);
+  for (const device of inputs) {
+    const opt = document.createElement("option");
+    opt.value = device.deviceId;
+    opt.textContent = device.label || `Audio input (${device.deviceId.slice(0, 6)}…)`;
+    select.appendChild(opt);
+  }
+  const optValues = [...select.options].map((o) => o.value);
+  if (previous && optValues.includes(previous)) {
+    select.value = previous;
+  }
+}
+
+async function startLiveAudioInput() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus("getUserMedia unavailable (open the app over http://localhost, not file://).", { error: true });
+    return;
+  }
+
+  await resumeAudioContext();
+  if (!state.audioContext) {
+    return;
+  }
+
+  if (state.mediaElementSource) {
+    try {
+      state.mediaElementSource.disconnect();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  stopLiveStreamsOnly();
+
+  const deviceId = elements.audioDeviceSelect?.value || "";
+  const audioConstraint = deviceId
+    ? {
+        deviceId: { exact: deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      }
+    : {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+
+  resetRealtimeBpmEstimator({ clearDetected: true });
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: audioConstraint,
+    video: false,
+  });
+
+  state.liveInput.stream = stream;
+  state.liveStreamSource = state.audioContext.createMediaStreamSource(stream);
+  state.liveStreamSource.connect(state.analyserNode);
+  state.liveStreamSource.connect(state.exportAudioDestination);
+  state.liveStreamSource.connect(state.audioContext.destination);
+  state.liveInput.active = true;
+  elements.audioElement.pause();
+  syncLiveAudioButton();
+  await refreshAudioInputDevices();
+  setStatus(
+    "Live capture on. Loopback devices (e.g. BlackHole) appear here as inputs—route your app into that device in system audio settings.",
+  );
+  startIdleLiveMeter();
+}
+
+function stopLiveAudioInput() {
+  connectFileSources();
+  setStatus(
+    state.audio.file ? "Live capture stopped; audio file routing restored." : "Live capture stopped.",
+  );
+}
+
+async function toggleLiveAudioInput() {
+  if (state.liveInput.active) {
+    stopLiveAudioInput();
+    return;
+  }
+  try {
+    await startLiveAudioInput();
+  } catch (error) {
+    stopLiveStreamsOnly();
+    setStatus(`Live capture failed: ${error.message}`, { error: true });
+  }
+}
+
+/**
+ * @param {HTMLVideoElement} video
+ * @param {number} desired
+ */
+function setLayerVideoPlaybackRate(video, desired) {
+  if (!Number.isFinite(desired) || desired <= 0) {
+    try {
+      video.playbackRate = 1;
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  const clampToEngine = (r) =>
+    Math.min(Math.max(r, MEDIA_PLAYBACK_RATE_MIN), MEDIA_PLAYBACK_RATE_MAX);
+
+  const ideal = clampToEngine(desired);
+  /** @type {number[]} */
+  const attempts = [];
+  const pushU = (r) => {
+    const x = clampToEngine(r);
+    if (!attempts.includes(x)) {
+      attempts.push(x);
+    }
+  };
+  pushU(ideal);
+  for (const step of PLAYBACK_RATE_FALLBACK_STEPS) {
+    if (step < ideal - 1e-9) {
+      pushU(step);
+    }
+  }
+
+  for (const rate of attempts) {
+    try {
+      video.playbackRate = rate;
+      return;
+    } catch {
+      /* try next fallback */
+    }
+  }
+  try {
+    video.playbackRate = 1;
+  } catch {
+    /* ignore */
   }
 }
 
@@ -283,22 +959,32 @@ function applyPlaybackRates() {
     if (!layer.file || !layer.duration) {
       continue;
     }
-    layer.video.loop = true;
-    layer.video.muted = true;
-    layer.video.playbackRate = layer.duration / barSeconds;
+    try {
+      layer.video.loop = true;
+      layer.video.muted = true;
+      const n = normalizeBarsPerLoop(layer.barsPerLoop);
+      const loopSeconds = barSeconds * n;
+      const desired = loopSeconds > 0 ? layer.duration / loopSeconds : 1;
+      setLayerVideoPlaybackRate(layer.video, desired);
+    } catch (err) {
+      console.warn(`PulseHZ: layer ${layer.id} playback rate skipped`, err);
+    }
   }
 }
 
 function syncLayerVideos(transportSeconds) {
   const barSeconds = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
-  const phase = barSeconds > 0 ? transportSeconds % barSeconds : 0;
 
   for (const layer of state.layers) {
     if (!layer.file || !layer.duration || !layer.ready) {
       continue;
     }
 
-    const desiredTime = ((phase / barSeconds) * layer.duration) % layer.duration;
+    const n = normalizeBarsPerLoop(layer.barsPerLoop);
+    const loopSeconds = barSeconds * n;
+    const phase = loopSeconds > 0 ? transportSeconds % loopSeconds : 0;
+    const desiredTime =
+      loopSeconds > 0 ? ((phase / loopSeconds) * layer.duration) % layer.duration : 0;
     const currentTime = Number.isFinite(layer.video.currentTime) ? layer.video.currentTime : 0;
     if (Math.abs(currentTime - desiredTime) > 0.08) {
       layer.video.currentTime = desiredTime;
@@ -306,22 +992,83 @@ function syncLayerVideos(transportSeconds) {
   }
 }
 
+/**
+ * Uniform scale + center crop to match CSS object-fit: cover (no stretched pixels).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {HTMLVideoElement | HTMLImageElement} media
+ */
+function drawMediaCover(ctx, media, cw, ch) {
+  const vw = media.videoWidth || media.width || 0;
+  const vh = media.videoHeight || media.height || 0;
+  if (!vw || !vh) {
+    return;
+  }
+  const scale = Math.max(cw / vw, ch / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  const dx = (cw - dw) / 2;
+  const dy = (ch - dh) / 2;
+  ctx.drawImage(media, 0, 0, vw, vh, dx, dy, dw, dh);
+}
+
+function applyPreviewBackdrop(ctx, cw, ch) {
+  const b = state.output.backdrop;
+  if (b === "black") {
+    ctx.fillStyle = "#000000";
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillRect(0, 0, cw, ch);
+    return;
+  }
+  if (b === "white") {
+    ctx.fillStyle = "#ffffff";
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillRect(0, 0, cw, ch);
+    return;
+  }
+  ctx.clearRect(0, 0, cw, ch);
+}
+
+function syncPreviewBackdropChrome() {
+  if (!elements.previewCanvasWrap) {
+    return;
+  }
+  elements.previewCanvasWrap.classList.toggle(
+    "preview-canvas-wrap--checker",
+    state.output.backdrop === "transparent",
+  );
+}
+
 function drawPreview(transportSeconds) {
-  previewContext.fillStyle = "#000";
-  previewContext.fillRect(0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
+  const cw = elements.previewCanvas.width;
+  const ch = elements.previewCanvas.height;
+  const scratchCtx = ensureLayerScratch(cw, ch);
+  const bpm = state.playback.bpm || DEFAULT_BPM;
+  const modulationRoutes = state.controls?.modulation ?? [];
+
+  applyPreviewBackdrop(previewContext, cw, ch);
 
   let hasVisual = false;
   for (const layer of state.layers) {
     if (!layer.file || !layer.ready) {
       continue;
     }
+
+    scratchCtx.globalCompositeOperation = "source-over";
+    scratchCtx.globalAlpha = 1;
+    scratchCtx.clearRect(0, 0, cw, ch);
+    drawMediaCover(scratchCtx, layer.video, cw, ch);
+
+    const opacity = resolveModulatedLayerOpacity(layer, transportSeconds, bpm, modulationRoutes);
+
     previewContext.globalCompositeOperation =
       layer.blendMode === "normal" ? "source-over" : layer.blendMode;
-    previewContext.drawImage(layer.video, 0, 0, elements.previewCanvas.width, elements.previewCanvas.height);
+    previewContext.globalAlpha = opacity;
+    previewContext.drawImage(layerScratchCanvas, 0, 0);
+    previewContext.globalAlpha = 1;
     hasVisual = true;
   }
-  previewContext.globalCompositeOperation = "source-over";
 
+  previewContext.globalCompositeOperation = "source-over";
   elements.previewStatus.classList.toggle("hidden", hasVisual);
 }
 
@@ -335,11 +1082,14 @@ function updateAudioMeter() {
   state.analyserNode.getByteFrequencyData(data);
   const average = data.reduce((sum, value) => sum + value, 0) / data.length;
   elements.meterBar.style.width = `${Math.min(100, (average / 255) * 100)}%`;
+
+  updateRealtimeBpmFromLive();
 }
 
 function renderLoop() {
   const transportSeconds = getTransportSeconds();
   syncLayerVideos(transportSeconds);
+  applyAutoDemo(transportSeconds);
   drawPreview(transportSeconds);
   updateAudioMeter();
   updateTransportDisplays(transportSeconds);
@@ -357,7 +1107,11 @@ async function startPlayback() {
     return;
   }
 
+  stopIdleLiveMeter();
   await resumeAudioContext();
+  if (!state.liveInput.active) {
+    connectFileSources();
+  }
   applyPlaybackRates();
   syncLayerVideos(state.playback.startOffsetSeconds);
 
@@ -406,6 +1160,9 @@ function pausePlayback() {
 
   elements.audioElement.pause();
   updateTransportDisplays(state.playback.startOffsetSeconds);
+  if (state.liveInput.active) {
+    startIdleLiveMeter();
+  }
   setStatus("Playback paused.");
 }
 
@@ -426,6 +1183,9 @@ function clearLayer(id) {
   layer.objectUrl = "";
   layer.duration = 0;
   layer.ready = false;
+  layer.barsPerLoop = 1;
+  layer.barsPerLoopLocked = false;
+  layer.opacity = 1;
   layer.video.removeAttribute("src");
   layer.video.load();
   renderLayers();
@@ -479,7 +1239,8 @@ function renderLayers() {
 
       const meta = document.createElement("div");
       meta.className = "layer-slot-meta";
-      meta.textContent = `${layer.duration.toFixed(2)}s`;
+      const bp = normalizeBarsPerLoop(layer.barsPerLoop);
+      meta.textContent = `${layer.duration.toFixed(2)}s · ${bp === 1 ? "1-bar" : `${bp}-bar`} loop`;
       slot.appendChild(meta);
     } else {
       const empty = document.createElement("div");
@@ -510,26 +1271,94 @@ function renderLayers() {
 
     const controls = document.createElement("div");
     controls.className = "layer-actions";
-    controls.innerHTML = `
-      <select class="select" data-blend-layer="${layer.id}">
-        ${SUPPORTED_BLEND_MODES.map((mode) => `<option value="${mode}">${mode}</option>`).join("")}
-      </select>
-      <button class="button button-danger" type="button" data-clear-layer="${layer.id}">Clear</button>
-    `;
+
+    const rowBlend = document.createElement("div");
+    rowBlend.className = "layer-actions-row";
+    const blendSelect = document.createElement("select");
+    blendSelect.className = "select";
+    blendSelect.setAttribute("data-blend-layer", String(layer.id));
+    blendSelect.innerHTML = SUPPORTED_BLEND_MODES.map(
+      (mode) => `<option value="${mode}">${mode}</option>`,
+    ).join("");
+    blendSelect.value = layer.blendMode;
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "button button-danger";
+    clearBtn.textContent = "Clear";
+    rowBlend.appendChild(blendSelect);
+    rowBlend.appendChild(clearBtn);
+
+    const rowBars = document.createElement("div");
+    rowBars.className = "layer-actions-row layer-bars-row";
+    const barsLabel = document.createElement("label");
+    barsLabel.className = "muted";
+    barsLabel.textContent = "Clip loop";
+    barsLabel.setAttribute("for", `layer-bars-${layer.id}`);
+    const barsSelect = document.createElement("select");
+    barsSelect.id = `layer-bars-${layer.id}`;
+    barsSelect.className = "select";
+    for (const n of [1, 2, 4]) {
+      const opt = document.createElement("option");
+      opt.value = String(n);
+      opt.textContent = n === 1 ? "1 bar" : `${n} bars`;
+      barsSelect.appendChild(opt);
+    }
+    barsSelect.value = String(normalizeBarsPerLoop(layer.barsPerLoop));
+    barsSelect.disabled = !layer.file;
+    barsSelect.addEventListener("change", () => {
+      const v = Number(barsSelect.value);
+      layer.barsPerLoop = v === 2 || v === 4 ? v : 1;
+      layer.barsPerLoopLocked = true;
+      applyPlaybackRates();
+      syncLayerVideos(getTransportSeconds());
+      renderLayers();
+      drawPreview(getTransportSeconds());
+    });
+    rowBars.appendChild(barsLabel);
+    rowBars.appendChild(barsSelect);
+
+    const rowOpacity = document.createElement("div");
+    rowOpacity.className = "layer-opacity-row";
+    const opacityLabel = document.createElement("label");
+    opacityLabel.className = "muted layer-opacity-label";
+    opacityLabel.textContent = "Opacity";
+    opacityLabel.setAttribute("for", `layer-opacity-${layer.id}`);
+    const opacityRange = document.createElement("input");
+    opacityRange.id = `layer-opacity-${layer.id}`;
+    opacityRange.className = "input layer-opacity-range";
+    opacityRange.type = "range";
+    opacityRange.min = "0";
+    opacityRange.max = "100";
+    opacityRange.step = "1";
+    opacityRange.value = String(Math.round((layer.opacity ?? 1) * 100));
+    const opacityValue = document.createElement("span");
+    opacityValue.className = "opacity-value";
+    opacityValue.textContent = `${opacityRange.value}%`;
+    const syncOpacity = () => {
+      layer.opacity = Number(opacityRange.value) / 100;
+      opacityValue.textContent = `${opacityRange.value}%`;
+      drawPreview(getTransportSeconds());
+    };
+    opacityRange.addEventListener("input", syncOpacity);
+    rowOpacity.appendChild(opacityLabel);
+    rowOpacity.appendChild(opacityRange);
+    rowOpacity.appendChild(opacityValue);
+
+    controls.appendChild(rowBlend);
+    controls.appendChild(rowBars);
+    controls.appendChild(rowOpacity);
 
     card.appendChild(header);
     card.appendChild(slot);
     card.appendChild(controls);
     elements.layersGrid.appendChild(card);
 
-    const blendSelect = controls.querySelector("select");
-    blendSelect.value = layer.blendMode;
     blendSelect.addEventListener("change", (event) => {
       layer.blendMode = event.target.value;
       drawPreview(getTransportSeconds());
     });
 
-    controls.querySelector("button").addEventListener("click", () => clearLayer(layer.id));
+    clearBtn.addEventListener("click", () => clearLayer(layer.id));
   }
 }
 
@@ -559,6 +1388,8 @@ async function loadVideoLayer(id, file) {
     layer.objectUrl = "";
     layer.duration = 0;
     layer.ready = false;
+    layer.barsPerLoop = 1;
+    layer.barsPerLoopLocked = false;
     if (layer.video.parentNode) {
       layer.video.remove();
     }
@@ -604,6 +1435,11 @@ async function loadVideoLayer(id, file) {
 
   layer.duration = layer.video.duration || 0;
   layer.ready = true;
+  const bpmForInfer = Number(elements.manualBpm.value) || state.playback.bpm || DEFAULT_BPM;
+  const barSecForInfer = barDurationSeconds(bpmForInfer, state.playback.beatsPerBar);
+  layer.barsPerLoop = inferBarsPerLoopFromDuration(layer.duration, barSecForInfer);
+  layer.barsPerLoopLocked = false;
+  applyPlaybackRates();
 
   renderLayers();
   syncLayerVideos(getTransportSeconds());
@@ -616,6 +1452,44 @@ async function loadVideoLayer(id, file) {
   );
 }
 
+function getResolutionKeyForExport() {
+  const { width, height } = getOutputDimensions(
+    state.output.tier,
+    state.output.aspect,
+  );
+  return `${width}x${height}`;
+}
+
+function applyOutputCanvasFromState() {
+  const tier = state.output.tier;
+  const aspect = state.output.aspect;
+  const { width, height } = getOutputDimensions(tier, aspect);
+
+  elements.previewCanvas.width = width;
+  elements.previewCanvas.height = height;
+
+  if (elements.previewCanvasWrap) {
+    elements.previewCanvasWrap.style.setProperty("--canvas-aspect", `${width} / ${height}`);
+    elements.previewCanvasWrap.style.setProperty("--canvas-ar-w", String(width));
+    elements.previewCanvasWrap.style.setProperty("--canvas-ar-h", String(height));
+  }
+  if (elements.outputDimensionsLabel) {
+    elements.outputDimensionsLabel.textContent = `Canvas: ${width}×${height}`;
+  }
+
+  const fixedTier = Boolean(OUTPUT_FIXED_PRESETS[tier]);
+  if (elements.outputAspectSelect) {
+    elements.outputAspectSelect.disabled = fixedTier;
+    elements.outputAspectSelect.classList.toggle("is-disabled", fixedTier);
+  }
+
+  if (elements.previewOutputLabel) {
+    elements.previewOutputLabel.textContent = `Canvas ${width}×${height}, captureStream()`;
+  }
+
+  syncPreviewBackdropChrome();
+}
+
 function serializeProjectState() {
   const bpm = Number(elements.manualBpm.value) || DEFAULT_BPM;
   return {
@@ -623,10 +1497,11 @@ function serializeProjectState() {
     projectName: elements.projectName.value || "PulseHZ Project",
     createdAt: new Date().toISOString(),
     exportSettings: {
-      resolution: "1920x1080",
+      resolution: getResolutionKeyForExport(),
       frameRate: 60,
       codec: "prores_4444",
       quality: "professional",
+      backdrop: state.output.backdrop,
     },
     transport: {
       bpm,
@@ -637,10 +1512,13 @@ function serializeProjectState() {
     layers: state.layers.map((layer) => ({
       id: layer.id,
       blendMode: layer.blendMode,
+      opacity: typeof layer.opacity === "number" ? layer.opacity : 1,
       hasVideo: Boolean(layer.file),
       sourceName: layer.file ? layer.file.name : null,
       sourceDurationSeconds: layer.file ? layer.duration : null,
+      barsPerLoop: normalizeBarsPerLoop(layer.barsPerLoop),
     })),
+    controls: structuredClone(state.controls),
   };
 }
 
@@ -693,7 +1571,7 @@ async function exportHighQuality() {
 async function createExportStream() {
   const canvasStream = elements.previewCanvas.captureStream(60);
   const combinedStream = new MediaStream([...canvasStream.getVideoTracks()]);
-  if (state.exportAudioDestination && state.audio.file) {
+  if (state.exportAudioDestination && (state.audio.file || state.liveInput.active)) {
     for (const track of state.exportAudioDestination.stream.getAudioTracks()) {
       combinedStream.addTrack(track);
     }
@@ -711,9 +1589,10 @@ async function exportWeb() {
     return;
   }
 
-  const durationSeconds = state.audio.file
-    ? Math.max(0.1, elements.audioElement.duration || barDurationSeconds(state.playback.bpm))
-    : barDurationSeconds(state.playback.bpm);
+  const durationSeconds =
+    state.audio.file && !state.liveInput.active
+      ? Math.max(0.1, elements.audioElement.duration || barDurationSeconds(state.playback.bpm))
+      : barDurationSeconds(state.playback.bpm);
 
   resetTransport();
   await startPlayback();
@@ -755,7 +1634,7 @@ async function exportWeb() {
 }
 
 function normalizeBpm(bpm) {
-  let value = bpm;
+  let value = !Number.isFinite(bpm) || bpm <= 0 ? DEFAULT_BPM : bpm;
   while (value < 70) {
     value *= 2;
   }
@@ -763,6 +1642,42 @@ function normalizeBpm(bpm) {
     value /= 2;
   }
   return value;
+}
+
+/**
+ * Keep the strongest onset in each minimum-spacing window so hi-hats / subdivisions
+ * do not produce extra peaks (which inflate BPM toward subdivision × tempo).
+ * @param {number[]} rawPeakBins indices into onset envelope
+ * @param {number[]} energies
+ * @param {number} minHopDistance minimum bins between accepted peaks
+ * @returns {number[]}
+ */
+function pickPeaksWithMinHopSpacing(rawPeakBins, energies, minHopDistance) {
+  const out = [];
+  let lastKept = -Infinity;
+  for (const idx of rawPeakBins) {
+    if (out.length === 0 || idx - lastKept >= minHopDistance) {
+      out.push(idx);
+      lastKept = idx;
+    } else if (energies[idx] > energies[lastKept]) {
+      out[out.length - 1] = idx;
+      lastKept = idx;
+    }
+  }
+  return out;
+}
+
+/** ~16s window; same estimator as decoded files (onset envelopes on hop-sized chunks). */
+const LIVE_BPM_CAPTURE_SECONDS = 16;
+
+function audioBufferFromMonoFloat32(channelData, sampleRate) {
+  const buffer = new AudioBuffer({
+    length: channelData.length,
+    numberOfChannels: 1,
+    sampleRate,
+  });
+  buffer.copyToChannel(channelData, 0, 0);
+  return buffer;
 }
 
 function estimateBpmFromAudioBuffer(audioBuffer) {
@@ -818,34 +1733,132 @@ function estimateBpmFromAudioBuffer(audioBuffer) {
   return winner;
 }
 
-async function detectBpm() {
-  if (!state.audio.file) {
-    setStatus("Load an audio track before detecting BPM.", { error: true });
+/**
+ * Tap the live graph with ScriptProcessorNode (deprecated but widely available).
+ * Keeps existing connections: only disconnects source→processor in cleanup.
+ */
+async function detectBpmFromLiveInput() {
+  if (!state.liveInput.active || !state.liveStreamSource || !state.audioContext) {
+    setStatus("Start live capture first (e.g. loopback from your app).", { error: true });
     return;
   }
+
+  const ctx = state.audioContext;
+  const sampleRate = ctx.sampleRate;
+  const targetSamples = Math.floor(sampleRate * LIVE_BPM_CAPTURE_SECONDS);
+  const accum = new Float32Array(targetSamples);
+  let written = 0;
+
+  const bufferSize = 4096;
+  let processor = null;
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+
+  state.audioAnalysisInFlight = true;
+  setStatus(
+    `Detecting BPM from live input (~${LIVE_BPM_CAPTURE_SECONDS}s — keep audio playing through this capture)...`,
+  );
+
+  try {
+    if (!ctx.createScriptProcessor) {
+      throw new Error("Live BPM needs ScriptProcessorNode (unsupported in this engine).");
+    }
+
+    processor = ctx.createScriptProcessor(bufferSize, 1, 1);
+    processor.onaudioprocess = (event) => {
+      if (written >= targetSamples) {
+        return;
+      }
+      const input = event.inputBuffer.getChannelData(0);
+      const take = Math.min(input.length, targetSamples - written);
+      accum.set(input.subarray(0, take), written);
+      written += take;
+    };
+
+    state.liveStreamSource.connect(processor);
+    processor.connect(mute);
+    mute.connect(ctx.destination);
+
+    const deadline = performance.now() + (LIVE_BPM_CAPTURE_SECONDS + 8) * 1000;
+    while (written < targetSamples && state.liveInput.active && performance.now() < deadline) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 40);
+      });
+    }
+
+    const minSamples = Math.floor(sampleRate * 5);
+    if (written < minSamples) {
+      throw new Error(
+        "Not enough live audio captured—keep Live capture on with the signal playing, then try again.",
+      );
+    }
+
+    const slice = accum.subarray(0, written);
+    const audioBuffer = audioBufferFromMonoFloat32(slice, sampleRate);
+    const bpm = estimateBpmFromAudioBuffer(audioBuffer);
+
+    state.playback.detectedBpm = bpm;
+    commitTransportBpm(bpm, "detect-live");
+    setStatus(`Detected BPM from live input: ${bpm.toFixed(1)}`);
+  } catch (error) {
+    setStatus(`BPM detection failed: ${error.message}`, { error: true });
+  } finally {
+    state.audioAnalysisInFlight = false;
+    if (processor) {
+      processor.onaudioprocess = null;
+      try {
+        processor.disconnect();
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        mute.disconnect();
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        if (state.liveStreamSource) {
+          state.liveStreamSource.disconnect(processor);
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+}
+
+async function detectBpmFromFile() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    throw new Error("Web Audio API is unavailable");
+  }
+  const analysisContext = new AudioContextCtor();
+  const audioBytes = await state.audio.file.arrayBuffer();
+  const audioBuffer = await analysisContext.decodeAudioData(audioBytes.slice(0));
+  const bpm = estimateBpmFromAudioBuffer(audioBuffer);
+  state.playback.detectedBpm = bpm;
+  commitTransportBpm(bpm, "detect-file");
+  setStatus(`Detected BPM: ${bpm.toFixed(1)}`);
+  await analysisContext.close();
+}
+
+async function detectBpm() {
   if (state.audioAnalysisInFlight) {
+    return;
+  }
+  if (state.liveInput.active) {
+    await detectBpmFromLiveInput();
+    return;
+  }
+  if (!state.audio.file) {
+    setStatus("Load an audio file or start live capture (loopback) to detect BPM.", { error: true });
     return;
   }
 
   state.audioAnalysisInFlight = true;
   setStatus("Analysing audio in the browser...");
-
   try {
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) {
-      throw new Error("Web Audio API is unavailable");
-    }
-    const analysisContext = new AudioContextCtor();
-    const audioBytes = await state.audio.file.arrayBuffer();
-    const audioBuffer = await analysisContext.decodeAudioData(audioBytes.slice(0));
-    const bpm = estimateBpmFromAudioBuffer(audioBuffer);
-    state.playback.detectedBpm = bpm;
-    state.playback.bpm = bpm;
-    elements.manualBpm.value = bpm.toFixed(1);
-    updateTransportDisplays(getTransportSeconds());
-    applyPlaybackRates();
-    setStatus(`Detected BPM: ${bpm.toFixed(1)}`);
-    await analysisContext.close();
+    await detectBpmFromFile();
   } catch (error) {
     setStatus(`BPM detection failed: ${error.message}`, { error: true });
   } finally {
@@ -864,6 +1877,7 @@ function clearAudio() {
   elements.audioElement.removeAttribute("src");
   elements.audioElement.classList.add("hidden");
   state.playback.usingAudioClock = false;
+  connectFileSources();
   setStatus("Audio track cleared.");
 }
 
@@ -887,7 +1901,7 @@ async function loadAudio(file) {
       reject(new Error(`${file.name}: ${describeMediaError(elements.audioElement)}`));
   });
 
-  ensureAudioGraph();
+  connectFileSources();
   setStatus(`Loaded audio track ${file.name}.`);
 }
 
@@ -897,9 +1911,7 @@ function handleManualBpmChange() {
     setStatus("BPM must be a positive number.", { error: true });
     return;
   }
-  state.playback.bpm = bpm;
-  updateTransportDisplays(getTransportSeconds());
-  applyPlaybackRates();
+  commitTransportBpm(bpm, "manual-input");
 }
 
 async function handleHighExportClick() {
@@ -918,13 +1930,88 @@ async function handleWebExportClick() {
   }
 }
 
+function syncOutputControlsFromState() {
+  if (elements.outputTierSelect) {
+    elements.outputTierSelect.value = state.output.tier;
+  }
+  if (elements.outputAspectSelect) {
+    elements.outputAspectSelect.value = state.output.aspect;
+  }
+  if (elements.outputBackdropSelect && BACKDROP_OPTIONS.includes(state.output.backdrop)) {
+    elements.outputBackdropSelect.value = state.output.backdrop;
+  }
+  applyOutputCanvasFromState();
+}
+
+function handleOutputSettingsChange() {
+  const tier = elements.outputTierSelect?.value || state.output.tier;
+  const aspect = elements.outputAspectSelect?.value || state.output.aspect;
+  const backdropRaw = elements.outputBackdropSelect?.value || state.output.backdrop;
+  const backdrop = BACKDROP_OPTIONS.includes(/** @type {BackdropKind} */ (backdropRaw))
+    ? /** @type {BackdropKind} */ (backdropRaw)
+    : state.output.backdrop;
+  state.output.tier = tier;
+  state.output.aspect = aspect;
+  state.output.backdrop = backdrop;
+  applyOutputCanvasFromState();
+  drawPreview(getTransportSeconds());
+}
+
+const DEMO_LFO_ROUTE_ID = "pulsehz-demo-lfo-opacity";
+
+function toggleDemoLfoOpacity() {
+  const mod = state.controls.modulation;
+  const idx = mod.findIndex((r) => r && r.id === DEMO_LFO_ROUTE_ID);
+  if (idx >= 0) {
+    mod.splice(idx, 1);
+    setStatus("Removed demo LFO route (layer 1 opacity).");
+  } else {
+    mod.push({
+      id: DEMO_LFO_ROUTE_ID,
+      enabled: true,
+      target: { scope: "layer", layerId: 1, paramId: "opacity" },
+      source: {
+        kind: "lfo",
+        waveform: "sine",
+        rateBeats: 1,
+        phaseTurns: 0,
+        depth: 0.35,
+        offset: 0,
+      },
+      amount: 1,
+    });
+    setStatus("Demo LFO on layer 1 opacity (one sine cycle per beat). Toggle again to remove.");
+  }
+  drawPreview(getTransportSeconds());
+}
+
 function wireEvents() {
+  elements.outputTierSelect?.addEventListener("change", handleOutputSettingsChange);
+  elements.outputAspectSelect?.addEventListener("change", handleOutputSettingsChange);
+  elements.outputBackdropSelect?.addEventListener("change", handleOutputSettingsChange);
   elements.playButton.addEventListener("click", () => {
     startPlayback().catch((error) => setStatus(error.message, { error: true }));
   });
   elements.pauseButton.addEventListener("click", pausePlayback);
   elements.detectBpmButton.addEventListener("click", detectBpm);
   elements.clearAudioButton.addEventListener("click", clearAudio);
+  elements.liveAudioButton?.addEventListener("click", () => {
+    toggleLiveAudioInput().catch((error) => setStatus(error.message, { error: true }));
+  });
+  elements.refreshAudioDevicesButton?.addEventListener("click", () => {
+    refreshAudioInputDevices().catch((error) => setStatus(error.message, { error: true }));
+  });
+  elements.audioDeviceSelect?.addEventListener("change", async () => {
+    if (!state.liveInput.active) {
+      return;
+    }
+    stopLiveStreamsOnly();
+    try {
+      await startLiveAudioInput();
+    } catch (error) {
+      setStatus(`Live capture failed: ${error.message}`, { error: true });
+    }
+  });
   elements.manualBpm.addEventListener("change", handleManualBpmChange);
   elements.audioInput.addEventListener("change", async (event) => {
     const [file] = event.target.files || [];
@@ -934,13 +2021,21 @@ function wireEvents() {
   });
   elements.exportHighButton.addEventListener("click", handleHighExportClick);
   elements.exportWebButton.addEventListener("click", handleWebExportClick);
+  elements.demoLfoOpacityButton?.addEventListener("click", toggleDemoLfoOpacity);
+  elements.autoDemoGridSelect?.addEventListener("change", handleAutoDemoGridChange);
 }
 
 function initialize() {
+  if (elements.autoDemoGridSelect) {
+    elements.autoDemoGridSelect.value = state.autoDemo.grid;
+  }
+  syncOutputControlsFromState();
   renderLayers();
   updateTransportDisplays(0);
   drawPreview(0);
   wireEvents();
+  syncLiveAudioButton();
+  void refreshAudioInputDevices();
   setStatus("Browser canvas output is ready. Add video layers to begin.");
 }
 
@@ -949,6 +2044,8 @@ window.pulsehzApp = {
   exportWeb,
   getPreviewStream: () => elements.previewCanvas.captureStream(60),
   getSerializableProjectState: serializeProjectState,
+  getControls: () => state.controls,
+  toggleDemoLfoOpacity,
 };
 
 initialize();

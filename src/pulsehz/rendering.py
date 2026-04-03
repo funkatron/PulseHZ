@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Iterable, Literal, Sequence
+
+BackdropKind = Literal["black", "white", "transparent"]
 
 
 BLEND_MODE_MAP = {
@@ -80,30 +82,68 @@ def build_filter_complex(
     frame_rate: int,
     bar_duration_seconds: float,
     render_duration_seconds: float,
+    backdrop: BackdropKind = "transparent",
 ) -> str:
-    """Build the FFmpeg filter graph for layered compositing."""
+    """Build the FFmpeg filter graph for layered compositing.
+
+    When ``backdrop`` is ``black`` or ``white``, callers must prepend a lavfi ``color=``
+    input as FFmpeg input 0; video files start at input index 1.
+
+    ``transparent`` matches the historical graph: the first video file is input 0 and acts
+    as the compositing base (no solid plate).
+    """
     if not layers:
         raise ValueError("at least one layer is required")
     if bar_duration_seconds <= 0 or render_duration_seconds <= 0:
         raise ValueError("durations must be positive")
+    if backdrop not in ("black", "white", "transparent"):
+        raise ValueError(f"invalid backdrop: {backdrop!r}")
 
     filter_parts: list[str] = []
     current_label = ""
+    has_solid = backdrop in ("black", "white")
+
+    if has_solid:
+        filter_parts.append(
+            f"[0:v]setsar=1,format=rgba,"
+            f"trim=duration={render_duration_seconds:.6f},setpts=PTS-STARTPTS[bg]"
+        )
 
     for index, layer in enumerate(layers):
         blend_mode = validate_blend_mode(layer["blendMode"])
         source_duration = float(layer.get("sourceDurationSeconds") or bar_duration_seconds)
-        speed_factor = bar_duration_seconds / max(source_duration, 0.001)
-        validate_blend_mode(blend_mode)
-        source_label = f"v{index}"
+        raw_bars = layer.get("barsPerLoop", 1)
+        try:
+            bars_loop = int(raw_bars)
+        except (TypeError, ValueError):
+            bars_loop = 1
+        if bars_loop not in (1, 2, 4):
+            bars_loop = 1
+        speed_factor = (bar_duration_seconds * bars_loop) / max(source_duration, 0.001)
+        in_idx = index + (1 if has_solid else 0)
+        source_label = f"vl{index}"
         filter_parts.append(
-            f"[{index}:v]fps={frame_rate},scale={width}:{height}:flags=lanczos,"
-            f"setsar=1,setpts={speed_factor:.6f}*PTS,format=rgba,"
+            f"[{in_idx}:v]fps={frame_rate},"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={width}:{height},setsar=1,setpts={speed_factor:.6f}*PTS,format=rgba,"
             f"trim=duration={render_duration_seconds:.6f},setpts=PTS-STARTPTS[{source_label}]"
         )
 
         if index == 0:
-            current_label = source_label
+            if has_solid:
+                next_label = "mix0"
+                if blend_mode == "normal":
+                    filter_parts.append(
+                        f"[bg][{source_label}]overlay=shortest=1:format=auto[{next_label}]"
+                    )
+                else:
+                    ffmpeg_mode = BLEND_MODE_MAP[blend_mode]
+                    filter_parts.append(
+                        f"[bg][{source_label}]blend=all_mode={ffmpeg_mode}:all_opacity=1[{next_label}]"
+                    )
+                current_label = next_label
+            else:
+                current_label = source_label
             continue
 
         next_label = f"mix{index}"
@@ -118,7 +158,9 @@ def build_filter_complex(
             )
         current_label = next_label
 
-    filter_parts.append(f"[{current_label}]format=yuv444p10le[outv]")
+    # Transparent compositor: preserve alpha for ProRes 4444 (yuva444p10le). Solid plates are opaque.
+    out_pix_fmt = "yuva444p10le" if backdrop == "transparent" else "yuv444p10le"
+    filter_parts.append(f"[{current_label}]format={out_pix_fmt}[outv]")
     return ";".join(filter_parts)
 
 
@@ -131,6 +173,7 @@ def iter_video_layers(layers: Iterable[dict]) -> list[dict]:
                 {
                     "blendMode": validate_blend_mode(layer["blendMode"]),
                     "sourceDurationSeconds": layer.get("sourceDurationSeconds"),
+                    "barsPerLoop": layer.get("barsPerLoop", 1),
                 }
             )
     return normalized

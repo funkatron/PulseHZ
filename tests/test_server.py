@@ -91,8 +91,24 @@ def test_build_filter_complex_supports_single_layer():
         render_duration_seconds=2.0,
     )
     assert "setpts=0.500000*PTS" in filter_complex
+
+
+def test_build_filter_complex_bars_per_loop_stretches_timeline():
+    """One 4s clip as a 2-bar loop at 2s/bar → setpts factor = (2*2)/4 = 1."""
+    filter_complex = build_filter_complex(
+        layers=[{"blendMode": "normal", "sourceDurationSeconds": 4.0, "barsPerLoop": 2}],
+        width=1920,
+        height=1080,
+        frame_rate=60,
+        bar_duration_seconds=2.0,
+        render_duration_seconds=4.0,
+    )
+    assert "setpts=1.000000*PTS" in filter_complex
+    assert "force_original_aspect_ratio=increase" in filter_complex
+    assert "crop=1920:1080" in filter_complex
     assert "[outv]" in filter_complex
     assert "overlay" not in filter_complex
+    assert "format=yuva444p10le[outv]" in filter_complex
 
 
 def test_build_filter_complex_supports_multiple_layers():
@@ -106,9 +122,59 @@ def test_build_filter_complex_supports_multiple_layers():
         frame_rate=60,
         bar_duration_seconds=2.0,
         render_duration_seconds=6.0,
+        backdrop="transparent",
     )
     assert "blend=all_mode=screen" in filter_complex
     assert "trim=duration=6.000000" in filter_complex
+    assert "format=yuva444p10le[outv]" in filter_complex
+
+
+def test_build_filter_complex_black_backdrop_uses_solid_plate():
+    filter_complex = build_filter_complex(
+        layers=[{"blendMode": "multiply", "sourceDurationSeconds": 2.0}],
+        width=1280,
+        height=720,
+        frame_rate=30,
+        bar_duration_seconds=2.0,
+        render_duration_seconds=3.0,
+        backdrop="black",
+    )
+    assert "setpts=PTS-STARTPTS[bg]" in filter_complex
+    assert "[bg][vl0]blend=all_mode=multiply" in filter_complex
+    assert "[1:v]fps=30" in filter_complex
+    assert "overlay" not in filter_complex
+    assert "format=yuv444p10le[outv]" in filter_complex
+
+
+def test_export_command_includes_lavfi_for_black_backdrop(monkeypatch, tmp_path):
+    metadata = _metadata_payload(
+        exportSettings={
+            "resolution": "1920x1080",
+            "frameRate": 60,
+            "codec": "prores_4444",
+            "quality": "professional",
+            "backdrop": "black",
+        },
+    )
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, capture_output, text, timeout):
+        captured.append(cmd)
+        Path(cmd[-1]).write_bytes(b"x")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr("pulsehz.server.subprocess.run", fake_run)
+    response = client.post(
+        "/api/export-video",
+        files=[
+            ("metadata", (None, json.dumps(metadata))),
+            ("video_files", ("layer-1.mp4", b"v", "video/mp4")),
+        ],
+    )
+    assert response.status_code == 200
+    cmd = captured[0]
+    assert "-f" in cmd and "lavfi" in cmd
+    assert any(a.startswith("color=c=black:") for a in cmd)
 
 
 def test_export_video_no_layers():
