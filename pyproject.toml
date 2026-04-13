@@ -1,14 +1,25 @@
 [project]
 name = "pulsehz-video-glitch"
 version = "1.0.0"
-description = "A desktop video glitch and blending tool with real-time preview"
+description = "Tempo-locked multi-layer video compositing in the browser with FFmpeg export (optional desktop shell)"
 authors = [
     {name = "PulseHZ", email = "coj@funkatron.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
-keywords = ["video", "glitch", "blending", "desktop", "opencv", "pyqt"]
+keywords = [
+    "video",
+    "compositing",
+    "browser",
+    "bpm",
+    "tempo",
+    "ffmpeg",
+    "glitch",
+    "blending",
+    "desktop",
+    "pyqt",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",

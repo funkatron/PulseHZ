@@ -1,45 +1,95 @@
 # PulseHZ
 
-## PKA Loopatron 5000 (LT5K)
+**Tempo-locked, multi-layer video in the browser** — stack clips like a live set, keep everything on the musical grid, and export when you are ready.
 
-**Note: this is not even alpha. If you think it's cool, please feel free to make PRs. If you use it, let me know! - EF 2022-10-21**
+PulseHZ is for people who want **performance energy** (layers, blend modes, opacity, short loops) without giving up a **clear transport**: one BPM, bar-aligned video, optional audio track or live input, and preview that matches what you intend to ship to disk.
 
-LT5K is a modular library for building syncronized, loop-based patterns for animation and sound generation in JavaScript.
+---
 
-![README-demo](./README-demo.gif)
+## Why use it
 
-# Demos
+- **One clock** — Manual BPM, file-based tempo hints, or live capture; transport drives layer sync and export metadata.
+- **Up to four clip slots** — Each layer: video, blend mode, opacity, and loop length in bars (1 / 2 / 4 at 4/4).
+- **Browser-first** — Compositing and preview run locally in Chromium/WebKit-class engines; no upload required for editing.
+- **Export** — High-quality ProRes or WebM paths via FFmpeg (install FFmpeg and keep it on your `PATH`).
 
-To view demos, you'll want to run a web server. I use [live-server](https://www.npmjs.com/package/live-server) for this.  If you do not already have it or a similar program installed, do the following:
+It is **early software**: rough edges are expected. If you try it, [open an issue](https://github.com/funkatron/PulseHZ/issues) or send feedback.
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| **Python** | 3.9+ |
+| **Package manager** | [uv](https://docs.astral.sh/uv/) recommended (`pip` works with care) |
+| **FFmpeg** | Required for export and some browser preview transcodes |
+| **Browser** | Modern Chromium or Safari-class engine for `/app/` |
+
+---
+
+## Quick start (web UI)
 
 ```bash
-npm install -g live-server
+git clone https://github.com/funkatron/PulseHZ.git
+cd PulseHZ
+uv sync
+uv run pulsehz-server
 ```
 
-Then, from the root of the LT5K, run:
+Default listen port is **6066**. Open:
+
+**http://127.0.0.1:6066/app/**
+
+Load one or more videos into the clip slots, add an audio file or use live capture (e.g. loopback), set BPM or use Detect BPM, then **Play**. Use the sidebar for export and output resolution.
+
+---
+
+## Desktop shell
+
+To run the PyQt wrapper that hosts the same web app:
 
 ```bash
-live-server ./
+uv run pulsehz-desktop
 ```
 
-`live-server` will probably say something like:
+---
+
+## Client launcher (browser)
+
+Starts the server if needed and opens the app in your default browser:
 
 ```bash
-Serving "./" at http://127.0.0.1:8080
-Ready for changes
+uv run pulsehz-client
 ```
 
-and then open a browser window to that URL.  You can then navigate to the `examples` directory and click on the demo you want to see.
+---
 
-- [Kitchen Sink Canvas Demo](http://127.0.0.1:8080/examples/demo-kitchensink.html)
+## Development
 
-# Structure
-
+```bash
+uv sync --extra dev --extra audio
+uv run pytest tests -q
 ```
-LoopatronArrangement
-    - syncStep
-    - LoopatronRenderer[]
-        - valueFunction -- function that returns a value
-        - renderFunction -- function that takes a value and does something with it
-        - renderTarget -- the target of the renderFunction
+
+Browser UI tests (Playwright; optional extra):
+
+```bash
+uv sync --extra e2e
+uv run playwright install chromium
+uv run pytest e2e/
 ```
+
+Root `conftest.py` pins Playwright browsers under `.cache/playwright` (gitignored). Set `PULSEHZ_KEEP_PLAYWRIGHT_PATH=1` if you need to use a custom `PLAYWRIGHT_BROWSERS_PATH`.
+
+---
+
+## License
+
+MIT — see [LICENSE.md](LICENSE.md).
+
+---
+
+## Repository
+
+- **Homepage / issues:** [github.com/funkatron/PulseHZ](https://github.com/funkatron/PulseHZ)
