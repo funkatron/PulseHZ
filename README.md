@@ -1,19 +1,17 @@
 # PulseHZ
 
-**Tempo-locked, multi-layer video in the browser** — stack clips like a live set, keep everything on the musical grid, and export when you are ready.
-
-PulseHZ is for people who want **performance energy** (layers, blend modes, opacity, short loops) without giving up a **clear transport**: one BPM, bar-aligned video, optional audio track or live input, and preview that matches what you intend to ship to disk.
+Multi-layer video compositing in the browser with a shared **BPM** and **bar-aligned** loops. You load clips into up to four slots, set blend and opacity, optionally attach audio or a live input, and export through FFmpeg.
 
 ---
 
-## Why use it
+## What it does
 
-- **One clock** — Manual BPM, file-based tempo hints, or live capture; transport drives layer sync and export metadata.
-- **Up to four clip slots** — Each layer: video, blend mode, opacity, and loop length in bars (1 / 2 / 4 at 4/4).
-- **Browser-first** — Compositing and preview run locally in Chromium/WebKit-class engines; no upload required for editing.
-- **Export** — High-quality ProRes or WebM paths via FFmpeg (install FFmpeg and keep it on your `PATH`).
+- **Transport** — One BPM (manual entry, detection from a file, or live input). Layer playback and export metadata follow that tempo.
+- **Layers** — Up to four video slots; per layer: blend mode, opacity, loop length in bars (1, 2, or 4 at 4/4).
+- **Runtime** — Compositing and preview run in the browser locally; nothing is uploaded for editing.
+- **Export** — ProRes or WebM via FFmpeg (`ffmpeg` on your `PATH`).
 
-It is **early software**: rough edges are expected. If you try it, [open an issue](https://github.com/funkatron/PulseHZ/issues) or send feedback.
+The project is **in development**; behavior and UI may change. [Issues](https://github.com/funkatron/PulseHZ/issues) are welcome.
 
 ---
 
@@ -22,9 +20,9 @@ It is **early software**: rough edges are expected. If you try it, [open an issu
 | | |
 |---|---|
 | **Python** | 3.9+ |
-| **Package manager** | [uv](https://docs.astral.sh/uv/) recommended (`pip` works with care) |
-| **FFmpeg** | Required for export and some browser preview transcodes |
-| **Browser** | Modern Chromium or Safari-class engine for `/app/` |
+| **Packages** | [uv](https://docs.astral.sh/uv/) recommended; `pip` is possible with manual care |
+| **FFmpeg** | Required for export and some preview transcodes |
+| **Browser** | A current Chromium- or WebKit-based browser for `/app/` |
 
 ---
 
@@ -37,17 +35,17 @@ uv sync
 uv run pulsehz-server
 ```
 
-Default listen port is **6066**. Open:
+Default port **6066**. Open:
 
 **http://127.0.0.1:6066/app/**
 
-Load one or more videos into the clip slots, add an audio file or use live capture (e.g. loopback), set BPM or use Detect BPM, then **Play**. Use the sidebar for export and output resolution.
+Add videos to the slots, optional audio or live capture, set BPM or run Detect BPM, then Play. Export and resolution options are in the sidebar.
 
 ---
 
 ## Desktop shell
 
-To run the PyQt wrapper that hosts the same web app:
+PyQt host for the same web UI:
 
 ```bash
 uv run pulsehz-desktop
@@ -55,9 +53,9 @@ uv run pulsehz-desktop
 
 ---
 
-## Client launcher (browser)
+## Client launcher
 
-Starts the server if needed and opens the app in your default browser:
+If no server is listening on the configured host/port, starts one and opens the app in your default browser:
 
 ```bash
 uv run pulsehz-client
@@ -72,7 +70,7 @@ uv sync --extra dev --extra audio
 uv run pytest tests -q
 ```
 
-Browser UI tests (Playwright; optional extra):
+Optional browser UI tests (Playwright):
 
 ```bash
 uv sync --extra e2e
@@ -80,7 +78,7 @@ uv run playwright install chromium
 uv run pytest e2e/
 ```
 
-Root `conftest.py` pins Playwright browsers under `.cache/playwright` (gitignored). Set `PULSEHZ_KEEP_PLAYWRIGHT_PATH=1` if you need to use a custom `PLAYWRIGHT_BROWSERS_PATH`.
+Root `conftest.py` sets `PLAYWRIGHT_BROWSERS_PATH` to `.cache/playwright` (gitignored). Use `PULSEHZ_KEEP_PLAYWRIGHT_PATH=1` to keep a custom `PLAYWRIGHT_BROWSERS_PATH`.
 
 ---
 
@@ -92,4 +90,4 @@ MIT — see [LICENSE.md](LICENSE.md).
 
 ## Repository
 
-- **Homepage / issues:** [github.com/funkatron/PulseHZ](https://github.com/funkatron/PulseHZ)
+[github.com/funkatron/PulseHZ](https://github.com/funkatron/PulseHZ)
