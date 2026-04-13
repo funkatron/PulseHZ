@@ -1,6 +1,8 @@
 # PulseHZ
 
-A tool for **music-aligned video performance**: layered clips stay on a shared **BPM** and **bar grid**. Up to four slots, blend and opacity per layer, optional audio file or live input for tempo, and export through FFmpeg.
+A **realtime** tool for **music-aligned video performance**: layered clips stay on a shared **BPM** and **bar grid**. You work while the transport runs—preview, blend, tempo, and loop length—not only offline batch export. Up to four slots, blend and opacity per layer, optional audio file or live input for tempo, and export through FFmpeg.
+
+It does not replace a DAW or a hardware controller. The layout borrows from **grid clip launch** (pad-style slots), **session** layering under one clock (similar to Ableton Live’s session view), and **tracker-style** bar-length loops—applied to **video**, not audio stems.
 
 ---
 
@@ -8,7 +10,7 @@ A tool for **music-aligned video performance**: layered clips stay on a shared *
 
 - **Tempo** — One BPM (manual entry, detection from a file, or live input). Playback and export follow that clock.
 - **Layers** — Up to four video slots; per layer: blend mode, opacity, loop length in bars (1, 2, or 4 at 4/4).
-- **Runtime** — Preview and compositing run locally; nothing is uploaded for editing.
+- **Runtime** — Realtime preview and compositing on your machine; nothing is uploaded for editing.
 - **Export** — ProRes or WebM via FFmpeg (`ffmpeg` on your `PATH`).
 
 The project is **in development**; behavior and UI may change. [Issues](https://github.com/funkatron/PulseHZ/issues) are welcome.
