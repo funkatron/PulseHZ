@@ -1,7 +1,7 @@
 [project]
 name = "pulsehz-video-glitch"
 version = "1.0.0"
-description = "Tempo-locked multi-layer video compositing with FFmpeg export (web UI and optional desktop shell)"
+description = "Music-aligned video performance: layered clips on a BPM/bar grid, FFmpeg export (web UI or optional desktop shell)"
 authors = [
     {name = "PulseHZ", email = "coj@funkatron.com"}
 ]

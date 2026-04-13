@@ -1,12 +1,12 @@
 # PulseHZ
 
-Multi-layer video compositing with a shared **BPM** and **bar-aligned** loops. Load clips into up to four slots, set blend and opacity, optionally attach audio or a live input, and export through FFmpeg.
+A tool for **music-aligned video performance**: layered clips stay on a shared **BPM** and **bar grid**. Up to four slots, blend and opacity per layer, optional audio file or live input for tempo, and export through FFmpeg.
 
 ---
 
 ## What it does
 
-- **Transport** — One BPM (manual entry, detection from a file, or live input). Layer playback and export metadata follow that tempo.
+- **Tempo** — One BPM (manual entry, detection from a file, or live input). Playback and export follow that clock.
 - **Layers** — Up to four video slots; per layer: blend mode, opacity, loop length in bars (1, 2, or 4 at 4/4).
 - **Runtime** — Preview and compositing run locally; nothing is uploaded for editing.
 - **Export** — ProRes or WebM via FFmpeg (`ffmpeg` on your `PATH`).
