@@ -4,6 +4,9 @@ import { emit, EVT_TRANSPORT_BPM_CHANGED } from "./app-events.js?v=20260412";
 
 const MAX_LAYERS = 4;
 const DEFAULT_BPM = 120;
+/** Manual BPM `input` is debounced so typing does not spam the transport; arrow keys still feel responsive. */
+const MANUAL_BPM_INPUT_DEBOUNCE_MS = 120;
+let manualBpmInputTimer = null;
 
 /**
  * HTMLMediaElement.playbackRate range is engine-specific (Chromium often ~0.0625–16; some WebViews lower).
@@ -1914,6 +1917,16 @@ function handleManualBpmChange() {
   commitTransportBpm(bpm, "manual-input");
 }
 
+function scheduleManualBpmFromInput() {
+  if (manualBpmInputTimer !== null) {
+    clearTimeout(manualBpmInputTimer);
+  }
+  manualBpmInputTimer = window.setTimeout(() => {
+    manualBpmInputTimer = null;
+    handleManualBpmChange();
+  }, MANUAL_BPM_INPUT_DEBOUNCE_MS);
+}
+
 async function handleHighExportClick() {
   try {
     await exportHighQuality();
@@ -2012,6 +2025,7 @@ function wireEvents() {
       setStatus(`Live capture failed: ${error.message}`, { error: true });
     }
   });
+  elements.manualBpm.addEventListener("input", scheduleManualBpmFromInput);
   elements.manualBpm.addEventListener("change", handleManualBpmChange);
   elements.audioInput.addEventListener("change", async (event) => {
     const [file] = event.target.files || [];
