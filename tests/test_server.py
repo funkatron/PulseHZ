@@ -104,8 +104,9 @@ def test_build_filter_complex_bars_per_loop_stretches_timeline():
         render_duration_seconds=4.0,
     )
     assert "setpts=1.000000*PTS" in filter_complex
-    assert "force_original_aspect_ratio=increase" in filter_complex
-    assert "crop=1920:1080" in filter_complex
+    assert "force_original_aspect_ratio=decrease" in filter_complex
+    assert "pad=1920:1080" in filter_complex
+    assert "0x00000000" in filter_complex
     assert "[outv]" in filter_complex
     assert "overlay" not in filter_complex
     assert "format=yuva444p10le[outv]" in filter_complex
@@ -142,6 +143,7 @@ def test_build_filter_complex_black_backdrop_uses_solid_plate():
     assert "setpts=PTS-STARTPTS[bg]" in filter_complex
     assert "[bg][vl0]blend=all_mode=multiply" in filter_complex
     assert "[1:v]fps=30" in filter_complex
+    assert "pad=1280:720:(ow-iw)/2:(oh-ih)/2:black" in filter_complex
     assert "overlay" not in filter_complex
     assert "format=yuv444p10le[outv]" in filter_complex
 

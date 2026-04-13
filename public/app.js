@@ -12,6 +12,11 @@ import {
 } from "./bpm-analysis.js?v=20260415";
 
 const MAX_LAYERS = 4;
+
+/** Bitmap size for layer slot thumbnails (CSS scales the canvas). */
+const SLOT_THUMB_BITMAP_W = 320;
+const SLOT_THUMB_BITMAP_H = 180;
+
 /** Manual BPM `input` is debounced so typing does not spam the transport; arrow keys still feel responsive. */
 const MANUAL_BPM_INPUT_DEBOUNCE_MS = 120;
 let manualBpmInputTimer = null;
@@ -46,7 +51,7 @@ const OUTPUT_FIXED_PRESETS = {
 
 /**
  * Pixel size for the main canvas and ProRes export metadata.
- * Layers are drawn with uniform scale and center crop to this frame.
+ * Layers are letterboxed into this frame by default (aspect ratio preserved; no crop).
  */
 function getOutputDimensions(tierId, aspectId) {
   const fixed = OUTPUT_FIXED_PRESETS[tierId];
@@ -1076,22 +1081,104 @@ function syncLayerVideos(transportSeconds) {
 }
 
 /**
- * Uniform scale + center crop to match CSS object-fit: cover (no stretched pixels).
+ * Uniform scale + center — matches CSS object-fit: **contain** (full frame visible, letterboxing).
  * @param {CanvasRenderingContext2D} ctx
  * @param {HTMLVideoElement | HTMLImageElement} media
  */
-function drawMediaCover(ctx, media, cw, ch) {
+function drawMediaContain(ctx, media, cw, ch) {
   const vw = media.videoWidth || media.width || 0;
   const vh = media.videoHeight || media.height || 0;
   if (!vw || !vh) {
     return;
   }
-  const scale = Math.max(cw / vw, ch / vh);
+  const scale = Math.min(cw / vw, ch / vh);
   const dw = vw * scale;
   const dh = vh * scale;
   const dx = (cw - dw) / 2;
   const dy = (ch - dh) / 2;
   ctx.drawImage(media, 0, 0, vw, vh, dx, dy, dw, dh);
+}
+
+/** Keep decode `<video>` under the off-screen staging host (not in layer cards). */
+function mountLayerVideoInStaging(layer) {
+  const host = ensureVideoLoadStaging();
+  if (layer.video.parentNode !== host) {
+    host.appendChild(layer.video);
+  }
+}
+
+/**
+ * Visible fallback for layer slot canvas before a decoded video frame exists.
+ * @param {CanvasRenderingContext2D} ctx
+ */
+function drawLayerSlotPlaceholder(ctx, cw, ch) {
+  ctx.save();
+  ctx.fillStyle = "#16161a";
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.055)";
+  ctx.lineWidth = 1;
+  const step = 14;
+  for (let x = -ch; x < cw + ch; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + ch, ch);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(180, 178, 170, 0.4)";
+  ctx.font = "600 12px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("Clip preview", cw / 2, ch / 2);
+  ctx.restore();
+}
+
+function refreshLayerSlotThumb(layer) {
+  const canvas = layer.slotThumbCanvas;
+  const v = layer.video;
+  if (!canvas || !v || !layer.ready) {
+    return;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+  const vw = v.videoWidth || 0;
+  const vh = v.videoHeight || 0;
+  if (!vw || !vh) {
+    drawLayerSlotPlaceholder(ctx, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
+    return;
+  }
+  ctx.fillStyle = "#16161a";
+  ctx.fillRect(0, 0, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
+  drawMediaContain(ctx, v, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
+}
+
+function queueSlotThumbPaint(layer) {
+  const paint = () => refreshLayerSlotThumb(layer);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(paint);
+  });
+  if (layer.video && layer.slotThumbCanvas) {
+    const v = layer.video;
+    v.addEventListener("loadeddata", paint, { once: true });
+    v.addEventListener("canplay", paint, { once: true });
+    v.addEventListener("seeked", paint, { once: true });
+    if (typeof v.requestVideoFrameCallback === "function") {
+      try {
+        v.requestVideoFrameCallback(() => paint());
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+function refreshAllLayerSlotThumbs() {
+  for (const layer of state.layers) {
+    if (layer.file && layer.ready && layer.slotThumbCanvas) {
+      refreshLayerSlotThumb(layer);
+    }
+  }
 }
 
 function applyPreviewBackdrop(ctx, cw, ch) {
@@ -1139,7 +1226,7 @@ function drawPreview(transportSeconds) {
     scratchCtx.globalCompositeOperation = "source-over";
     scratchCtx.globalAlpha = 1;
     scratchCtx.clearRect(0, 0, cw, ch);
-    drawMediaCover(scratchCtx, layer.video, cw, ch);
+    drawMediaContain(scratchCtx, layer.video, cw, ch);
 
     const opacity = resolveModulatedLayerOpacity(layer, transportSeconds, bpm, modulationRoutes);
 
@@ -1248,6 +1335,7 @@ function pausePlayback() {
     startIdleLiveMeter();
   }
   setStatus("Playback paused.");
+  refreshAllLayerSlotThumbs();
 }
 
 function resetTransport() {
@@ -1256,6 +1344,7 @@ function resetTransport() {
   updateTransportDisplays(0);
   syncLayerVideos(0);
   drawPreview(0);
+  refreshAllLayerSlotThumbs();
 }
 
 function clearLayer(id) {
@@ -1270,6 +1359,7 @@ function clearLayer(id) {
   layer.barsPerLoop = 1;
   layer.barsPerLoopLocked = false;
   layer.opacity = 1;
+  layer.slotThumbCanvas = null;
   layer.video.removeAttribute("src");
   layer.video.load();
   renderLayers();
@@ -1317,9 +1407,21 @@ function renderLayers() {
     slot.appendChild(fileInput);
 
     if (layer.file) {
+      mountLayerVideoInStaging(layer);
       layer.video.controls = false;
       layer.video.playsInline = true;
-      slot.appendChild(layer.video);
+
+      const thumb = document.createElement("canvas");
+      thumb.className = "layer-slot-thumb";
+      thumb.width = SLOT_THUMB_BITMAP_W;
+      thumb.height = SLOT_THUMB_BITMAP_H;
+      layer.slotThumbCanvas = thumb;
+      const tctx = thumb.getContext("2d");
+      if (tctx) {
+        drawLayerSlotPlaceholder(tctx, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
+      }
+      slot.appendChild(thumb);
+      queueSlotThumbPaint(layer);
 
       const meta = document.createElement("div");
       meta.className = "layer-slot-meta";
@@ -1446,7 +1548,13 @@ function renderLayers() {
   }
 }
 
-async function loadVideoLayer(id, file) {
+/**
+ * @param {number} id
+ * @param {File} file
+ * @param {{ devAutoloadBatch?: boolean }} [options]
+ */
+async function loadVideoLayer(id, file, options = {}) {
+  const { devAutoloadBatch = false } = options;
   const layer = state.layers[id - 1];
   if (layer.objectUrl) {
     URL.revokeObjectURL(layer.objectUrl);
@@ -1460,7 +1568,7 @@ async function loadVideoLayer(id, file) {
   layer.video.muted = true;
   layer.video.loop = true;
   layer.video.playsInline = true;
-  layer.video.preload = "auto";
+  layer.video.preload = "metadata";
 
   ensureVideoLoadStaging().appendChild(layer.video);
 
@@ -1529,11 +1637,27 @@ async function loadVideoLayer(id, file) {
   syncLayerVideos(getTransportSeconds());
   drawPreview(getTransportSeconds());
   updateTransportDisplays(getTransportSeconds());
-  setStatus(
-    previewViaTranscode
-      ? `Loaded ${file.name} into layer ${id} (browser preview via server transcode; export still uses the original file).`
-      : `Loaded ${file.name} into layer ${id}.`,
-  );
+  if (!devAutoloadBatch) {
+    setStatus(
+      previewViaTranscode
+        ? `Loaded ${file.name} into layer ${id} (browser preview via server transcode; export still uses the original file).`
+        : `Loaded ${file.name} into layer ${id}.`,
+    );
+  }
+
+  if (!state.playback.isPlaying) {
+    try {
+      layer.video.pause();
+    } catch {
+      /* ignore */
+    }
+  } else {
+    try {
+      await layer.video.play();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
 }
 
 function getResolutionKeyForExport() {
@@ -2076,6 +2200,185 @@ function initialize() {
   setStatus("Browser canvas output is ready. Add video layers to begin.");
 }
 
+/**
+ * Base URL for resolving dev autoload paths (`demo-clips/...`) so it works when the
+ * page is `/app` (no trailing slash) — relative URLs must not drop the `/app/` prefix.
+ * @returns {URL}
+ */
+function devAutoloadAppDirectoryBase() {
+  const u = new URL(window.location.href);
+  let path = u.pathname;
+  if (!path.endsWith("/")) {
+    const parts = path.split("/").filter(Boolean);
+    const last = parts.length ? parts[parts.length - 1] : "";
+    if (last && last.includes(".")) {
+      parts.pop();
+    }
+    path = `/${parts.join("/")}`;
+    if (path !== "/") {
+      path = `${path}/`;
+    }
+  }
+  u.pathname = path || "/";
+  return u;
+}
+
+/**
+ * Safe filename for a demo WebM (manifest entries and demo-clips/ children).
+ * Rejects path separators, traversal, and odd encodings.
+ * @param {string} name
+ */
+function assertSafeDemoWebmFilename(name) {
+  if (typeof name !== "string" || !name || name.length > 200) {
+    throw new Error("invalid clip filename");
+  }
+  if (name !== name.trim() || name.includes("/") || name.includes("\\")) {
+    throw new Error("invalid clip filename");
+  }
+  if (!/^[\w.-]+\.webm$/.test(name)) {
+    throw new Error("invalid clip filename");
+  }
+}
+
+/**
+ * Resolve a dev-only autoload path to a same-origin URL + safe filename.
+ * Blocks absolute URLs, scheme-relative URLs, traversal, and paths outside
+ * `demo-clips/<name>.webm` or `fixture-debug.webm` next to the app.
+ * @param {string} rawPath from query string (e.g. `demo-clips/11-mandelbrot.webm`)
+ * @returns {{ url: URL, filename: string }}
+ */
+function resolveAutoloadWebmPath(rawPath) {
+  const trimmed = rawPath.trim();
+  if (!trimmed.endsWith(".webm")) {
+    throw new Error("autoload path must end with .webm");
+  }
+  if (trimmed.includes("://") || trimmed.startsWith("//")) {
+    throw new Error("autoload path must be relative (no URL scheme)");
+  }
+  const forward = trimmed.replace(/\\/g, "/");
+  if (forward.includes("../") || forward.split("/").includes("..")) {
+    throw new Error("path traversal is not allowed");
+  }
+  let decoded;
+  try {
+    decoded = decodeURIComponent(forward);
+  } catch {
+    throw new Error("invalid path encoding");
+  }
+  if (decoded.includes("../") || decoded.split("/").includes("..")) {
+    throw new Error("path traversal is not allowed");
+  }
+  const url = new URL(decoded, devAutoloadAppDirectoryBase());
+  if (url.origin !== window.location.origin) {
+    throw new Error("cross-origin autoload is not allowed");
+  }
+  if (url.pathname.includes("/../") || url.pathname.includes("/..")) {
+    throw new Error("invalid path");
+  }
+
+  const p = url.pathname;
+  const demo = /\/demo-clips\/([^/]+)$/.exec(p);
+  if (demo) {
+    assertSafeDemoWebmFilename(demo[1]);
+    return { url, filename: demo[1] };
+  }
+  if (/\/fixture-debug\.webm$/.test(p)) {
+    return { url, filename: "fixture-debug.webm" };
+  }
+  throw new Error("autoload path must be demo-clips/<name>.webm or fixture-debug.webm");
+}
+
+/**
+ * Dev-only: load demo WebM clips generated by `scripts/generate-demo-clips.sh`.
+ * Query `autoload`:
+ * - `1` or `first` — first clip in `demo-clips/manifest.json` → layer 1 (stable for smoke tests).
+ * - `random` — random clip from manifest → layer 1.
+ * - `all` — first min(4, N) clips → layers 1–4.
+ * - `fixture` — legacy single file `fixture-debug.webm` next to the app (optional).
+ * - path ending in `.webm` (e.g. `demo-clips/11-mandelbrot.webm`) → layer 1 (same-origin, allowlisted paths only).
+ */
+async function loadClipFromResolvedUrl(url, filename, layerId, batch = false) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`${res.status} ${url}`);
+  }
+  const blob = await res.blob();
+  const file = new File([blob], filename, {
+    type: blob.type || "video/webm",
+  });
+  await loadVideoLayer(layerId, file, { devAutoloadBatch: batch });
+}
+
+async function maybeDevAutoload() {
+  const q = new URLSearchParams(window.location.search);
+  const raw = q.get("autoload");
+  if (raw === null || raw === "") {
+    return;
+  }
+  const trimmed = raw.trim();
+  const kw = trimmed.toLowerCase();
+
+  try {
+    if (trimmed.endsWith(".webm")) {
+      const path = trimmed.replace(/^\//, "");
+      const { url, filename } = resolveAutoloadWebmPath(path);
+      await loadClipFromResolvedUrl(url, filename, 1, false);
+      return;
+    }
+
+    if (kw === "fixture") {
+      const { url, filename } = resolveAutoloadWebmPath("fixture-debug.webm");
+      await loadClipFromResolvedUrl(url, filename, 1, false);
+      return;
+    }
+
+    const manifestUrl = new URL("demo-clips/manifest.json", devAutoloadAppDirectoryBase());
+    const manRes = await fetch(manifestUrl);
+    if (!manRes.ok) {
+      throw new Error(
+        `No ${manifestUrl.pathname} (${manRes.status}). Run: bash scripts/generate-demo-clips.sh`,
+      );
+    }
+    const manifest = await manRes.json();
+    const clips = Array.isArray(manifest) ? manifest : manifest.clips;
+    if (!Array.isArray(clips) || clips.length === 0) {
+      throw new Error("demo-clips/manifest.json has no clips");
+    }
+
+    if (kw === "1" || kw === "first") {
+      assertSafeDemoWebmFilename(clips[0]);
+      const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${clips[0]}`);
+      await loadClipFromResolvedUrl(url, filename, 1, false);
+      return;
+    }
+    if (kw === "random") {
+      const pick = clips[Math.floor(Math.random() * clips.length)];
+      assertSafeDemoWebmFilename(pick);
+      const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${pick}`);
+      await loadClipFromResolvedUrl(url, filename, 1, false);
+      return;
+    }
+    if (kw === "all") {
+      const n = Math.min(4, clips.length);
+      for (let i = 0; i < n; i++) {
+        assertSafeDemoWebmFilename(clips[i]);
+        const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${clips[i]}`);
+        await loadClipFromResolvedUrl(url, filename, i + 1, true);
+      }
+      setStatus(`Dev autoload: loaded ${n} demo clips into layers 1–${n}.`);
+      return;
+    }
+
+    setStatus(
+      `Unknown autoload=${trimmed}. Use: 1, first, random, all, fixture, or a path ending in .webm`,
+      { error: true },
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setStatus(`Dev autoload failed: ${msg}`, { error: true });
+  }
+}
+
 window.pulsehzApp = {
   exportHighQuality,
   exportWeb,
@@ -2086,3 +2389,4 @@ window.pulsehzApp = {
 };
 
 initialize();
+void maybeDevAutoload();

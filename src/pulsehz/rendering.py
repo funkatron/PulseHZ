@@ -75,6 +75,15 @@ def validate_blend_mode(blend_mode: str) -> str:
     return blend_mode
 
 
+def _letterbox_pad_color(backdrop: BackdropKind) -> str:
+    """FFmpeg pad color for layer letterboxing (opaque plate colors match backdrop)."""
+    if backdrop == "black":
+        return "black"
+    if backdrop == "white":
+        return "white"
+    return "0x00000000"
+
+
 def build_filter_complex(
     layers: Sequence[dict],
     width: int,
@@ -91,6 +100,10 @@ def build_filter_complex(
 
     ``transparent`` matches the historical graph: the first video file is input 0 and acts
     as the compositing base (no solid plate).
+
+    Each video layer is scaled with aspect preserved and letterboxed to the output size
+    (``force_original_aspect_ratio=decrease`` + ``pad``), matching preview ``object-fit:
+    contain`` behavior.
     """
     if not layers:
         raise ValueError("at least one layer is required")
@@ -122,11 +135,13 @@ def build_filter_complex(
         speed_factor = (bar_duration_seconds * bars_loop) / max(source_duration, 0.001)
         in_idx = index + (1 if has_solid else 0)
         source_label = f"vl{index}"
+        pad_color = _letterbox_pad_color(backdrop)
         filter_parts.append(
             f"[{in_idx}:v]fps={frame_rate},"
-            f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
-            f"crop={width}:{height},setsar=1,setpts={speed_factor:.6f}*PTS,format=rgba,"
-            f"trim=duration={render_duration_seconds:.6f},setpts=PTS-STARTPTS[{source_label}]"
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"format=rgba,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:{pad_color},"
+            f"setsar=1,setpts={speed_factor:.6f}*PTS,trim=duration={render_duration_seconds:.6f},"
+            f"setpts=PTS-STARTPTS[{source_label}]"
         )
 
         if index == 0:
