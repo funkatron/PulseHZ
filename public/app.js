@@ -352,6 +352,7 @@ async function runFileBpmAnalysis() {
   }
   state.audio.bpmSegmentsStatus = "building";
   state.audio.bpmSegments = null;
+  state.audio.analysisMono = null;
   try {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     const ctx = new AudioContextCtor();
@@ -359,6 +360,7 @@ async function runFileBpmAnalysis() {
     const decoded = await ctx.decodeAudioData(bytes.slice(0));
     await ctx.close();
     const mono = downmixToMonoBuffer(decoded);
+    state.audio.analysisMono = mono;
     const segments = await buildBpmSegmentsAsync(mono, {
       windowSec: 12,
       hopSec: 6,
@@ -571,6 +573,9 @@ const state = {
     file: null,
     objectUrl: "",
     duration: 0,
+    /** Decoded mono buffer for full-file analysis; cleared with audio track. */
+    /** @type {AudioBuffer | null} */
+    analysisMono: null,
     /** @type {Array<{ tCenter: number, bpm: number }> | null} */
     bpmSegments: null,
     /** @type {"idle" | "building" | "ready" | "error"} */
@@ -1870,6 +1875,7 @@ function clearAudio() {
   state.audio.file = null;
   state.audio.objectUrl = "";
   state.audio.duration = 0;
+  state.audio.analysisMono = null;
   state.audio.bpmSegments = null;
   state.audio.bpmSegmentsStatus = "idle";
   fileBpmFollowLastApplyMs = 0;
