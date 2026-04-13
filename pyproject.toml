@@ -1,7 +1,7 @@
 [project]
 name = "pulsehz-video-glitch"
 version = "1.0.0"
-description = "Tempo-locked multi-layer video compositing in the browser with FFmpeg export (optional desktop shell)"
+description = "Tempo-locked multi-layer video compositing with FFmpeg export (web UI and optional desktop shell)"
 authors = [
     {name = "PulseHZ", email = "coj@funkatron.com"}
 ]

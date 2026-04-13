@@ -1,6 +1,6 @@
 # PulseHZ
 
-Multi-layer video compositing in the browser with a shared **BPM** and **bar-aligned** loops. You load clips into up to four slots, set blend and opacity, optionally attach audio or a live input, and export through FFmpeg.
+Multi-layer video compositing with a shared **BPM** and **bar-aligned** loops. Load clips into up to four slots, set blend and opacity, optionally attach audio or a live input, and export through FFmpeg.
 
 ---
 
@@ -8,7 +8,7 @@ Multi-layer video compositing in the browser with a shared **BPM** and **bar-ali
 
 - **Transport** — One BPM (manual entry, detection from a file, or live input). Layer playback and export metadata follow that tempo.
 - **Layers** — Up to four video slots; per layer: blend mode, opacity, loop length in bars (1, 2, or 4 at 4/4).
-- **Runtime** — Compositing and preview run in the browser locally; nothing is uploaded for editing.
+- **Runtime** — Preview and compositing run locally; nothing is uploaded for editing.
 - **Export** — ProRes or WebM via FFmpeg (`ffmpeg` on your `PATH`).
 
 The project is **in development**; behavior and UI may change. [Issues](https://github.com/funkatron/PulseHZ/issues) are welcome.
@@ -22,7 +22,7 @@ The project is **in development**; behavior and UI may change. [Issues](https://
 | **Python** | 3.9+ |
 | **Packages** | [uv](https://docs.astral.sh/uv/) recommended; `pip` is possible with manual care |
 | **FFmpeg** | Required for export and some preview transcodes |
-| **Browser** | A current Chromium- or WebKit-based browser for `/app/` |
+| **Browser** | Only if you use the web UI: a current Chromium- or WebKit-based engine |
 
 ---
 
