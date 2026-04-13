@@ -389,9 +389,12 @@ label.muted {
 }
 
 .preview-canvas {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
+  /* Map the bitmap into the box without non-uniform scale (fixes ovals when the box is off-ratio). */
+  object-fit: contain;
+  object-position: center;
   background: var(--preview-bg);
 }
 
