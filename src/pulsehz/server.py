@@ -251,6 +251,12 @@ async def export_video(
     except HTTPException:
         _cleanup_dir(temp_dir)
         raise
+    except ValueError as exc:
+        _cleanup_dir(temp_dir)
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc) or "Invalid export parameters",
+        ) from exc
     except Exception as exc:
         _cleanup_dir(temp_dir)
         raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc

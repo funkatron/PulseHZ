@@ -1,7 +1,9 @@
+import os
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 from PyQt6.QtCore import QUrl
 
@@ -89,8 +91,14 @@ class DesktopApp(QMainWindow):
 
         self.status_label.setText("Starting server...")
         try:
+            # Checkout layout: package lives under src/. Subprocess has no run_desktop.py path injection.
+            src_root = Path(__file__).resolve().parents[1]
+            env = os.environ.copy()
+            prev = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = str(src_root) + (os.pathsep + prev if prev else "")
             self.server_process = subprocess.Popen(
-                [sys.executable, "-m", "pulsehz.main", "--mode", "server"]
+                [sys.executable, "-m", "pulsehz.main", "--mode", "server"],
+                env=env,
             )
         except Exception as exc:
             self.status_label.setText("Failed to start server")

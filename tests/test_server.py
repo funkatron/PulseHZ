@@ -191,6 +191,21 @@ def test_export_video_requires_matching_upload_count():
     assert "count must match" in response.json()["detail"]
 
 
+def test_export_video_invalid_resolution_returns_422():
+    """Malformed export fields that pass JSON/Pydantic but fail command build → 422, not 500."""
+    metadata = _metadata_payload()
+    metadata["exportSettings"]["resolution"] = "not-a-valid-resolution"
+    response = client.post(
+        "/api/export-video",
+        files=[
+            ("metadata", (None, json.dumps(metadata))),
+            ("video_files", ("layer-1.mp4", b"v", "video/mp4")),
+        ],
+    )
+    assert response.status_code == 422
+    assert "invalid resolution" in response.json()["detail"].lower()
+
+
 def test_export_video_returns_rendered_file(monkeypatch, tmp_path):
     metadata = _metadata_payload(
         layers=[
