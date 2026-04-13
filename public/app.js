@@ -1,12 +1,22 @@
 import { createEmptyControlsPayload } from "./control-model.js?v=20260412";
 import { resolveModulatedLayerOpacity } from "./modulation-runtime.js?v=20260412";
 import { emit, EVT_TRANSPORT_BPM_CHANGED } from "./app-events.js?v=20260412";
+import {
+  DEFAULT_BPM,
+  normalizeBpm,
+  estimateBpmFromAudioBuffer,
+  downmixToMonoBuffer,
+  buildBpmSegmentsAsync,
+  bpmAtTime,
+  medianBpmFromSegments,
+} from "./bpm-analysis.js?v=20260415";
 
 const MAX_LAYERS = 4;
-const DEFAULT_BPM = 120;
 /** Manual BPM `input` is debounced so typing does not spam the transport; arrow keys still feel responsive. */
 const MANUAL_BPM_INPUT_DEBOUNCE_MS = 120;
 let manualBpmInputTimer = null;
+/** Throttle commits from file segment map (same ballpark as live estimator). */
+let fileBpmFollowLastApplyMs = 0;
 
 /**
  * HTMLMediaElement.playbackRate range is engine-specific (Chromium often ~0.0625–16; some WebViews lower).
@@ -332,6 +342,67 @@ function commitTransportBpm(nextBpm, source) {
   });
 }
 
+/**
+ * Decode loaded file to mono, build sliding-window BPM segments (idle-yielding).
+ * Does not block load; runs in background.
+ */
+async function runFileBpmAnalysis() {
+  if (!state.audio.file) {
+    return;
+  }
+  state.audio.bpmSegmentsStatus = "building";
+  state.audio.bpmSegments = null;
+  try {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContextCtor();
+    const bytes = await state.audio.file.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(bytes.slice(0));
+    await ctx.close();
+    const mono = downmixToMonoBuffer(decoded);
+    const segments = await buildBpmSegmentsAsync(mono, {
+      windowSec: 12,
+      hopSec: 6,
+      maxSeconds: 600,
+    });
+    state.audio.bpmSegments = segments;
+    state.audio.bpmSegmentsStatus = "ready";
+  } catch (error) {
+    console.warn("PulseHZ: file BPM segment analysis failed", error);
+    state.audio.bpmSegmentsStatus = "error";
+  }
+}
+
+/**
+ * While a file is playing (not live), map current playback time to segment BPM and nudge transport.
+ */
+function updateFileBpmFromSegments() {
+  if (state.liveInput.active) {
+    return;
+  }
+  if (!state.audio.file || !state.playback.isPlaying) {
+    return;
+  }
+  if (state.audio.bpmSegmentsStatus !== "ready" || !state.audio.bpmSegments?.length) {
+    return;
+  }
+  const t = elements.audioElement.currentTime || 0;
+  const target = bpmAtTime(state.audio.bpmSegments, t);
+  if (target == null || !Number.isFinite(target)) {
+    return;
+  }
+  const rounded = Math.round(target * 10) / 10;
+  const now = performance.now();
+  if (now - fileBpmFollowLastApplyMs < 140) {
+    return;
+  }
+  if (Math.abs(rounded - state.playback.bpm) < 0.15) {
+    return;
+  }
+  fileBpmFollowLastApplyMs = now;
+  state.playback.detectedBpm = rounded;
+  commitTransportBpm(rounded, "file-segments");
+}
+
 function barDurationSeconds(bpm, beatsPerBar = 4) {
   return (60 / bpm) * beatsPerBar;
 }
@@ -500,6 +571,10 @@ const state = {
     file: null,
     objectUrl: "",
     duration: 0,
+    /** @type {Array<{ tCenter: number, bpm: number }> | null} */
+    bpmSegments: null,
+    /** @type {"idle" | "building" | "ready" | "error"} */
+    bpmSegmentsStatus: "idle",
   },
   /** Editor-only: discrete steps on musical grid. Not serialized to export metadata. */
   autoDemo: {
@@ -1095,6 +1170,7 @@ function renderLoop() {
   applyAutoDemo(transportSeconds);
   drawPreview(transportSeconds);
   updateAudioMeter();
+  updateFileBpmFromSegments();
   updateTransportDisplays(transportSeconds);
   state.animationFrameId = requestAnimationFrame(renderLoop);
 }
@@ -1636,40 +1712,6 @@ async function exportWeb() {
   setStatus("Browser capture export finished.");
 }
 
-function normalizeBpm(bpm) {
-  let value = !Number.isFinite(bpm) || bpm <= 0 ? DEFAULT_BPM : bpm;
-  while (value < 70) {
-    value *= 2;
-  }
-  while (value > 180) {
-    value /= 2;
-  }
-  return value;
-}
-
-/**
- * Keep the strongest onset in each minimum-spacing window so hi-hats / subdivisions
- * do not produce extra peaks (which inflate BPM toward subdivision × tempo).
- * @param {number[]} rawPeakBins indices into onset envelope
- * @param {number[]} energies
- * @param {number} minHopDistance minimum bins between accepted peaks
- * @returns {number[]}
- */
-function pickPeaksWithMinHopSpacing(rawPeakBins, energies, minHopDistance) {
-  const out = [];
-  let lastKept = -Infinity;
-  for (const idx of rawPeakBins) {
-    if (out.length === 0 || idx - lastKept >= minHopDistance) {
-      out.push(idx);
-      lastKept = idx;
-    } else if (energies[idx] > energies[lastKept]) {
-      out[out.length - 1] = idx;
-      lastKept = idx;
-    }
-  }
-  return out;
-}
-
 /** ~16s window; same estimator as decoded files (onset envelopes on hop-sized chunks). */
 const LIVE_BPM_CAPTURE_SECONDS = 16;
 
@@ -1681,59 +1723,6 @@ function audioBufferFromMonoFloat32(channelData, sampleRate) {
   });
   buffer.copyToChannel(channelData, 0, 0);
   return buffer;
-}
-
-function estimateBpmFromAudioBuffer(audioBuffer) {
-  const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  const hopSize = 1024;
-  const energies = [];
-
-  for (let offset = 0; offset < channelData.length; offset += hopSize) {
-    let sum = 0;
-    const end = Math.min(channelData.length, offset + hopSize);
-    for (let index = offset; index < end; index += 1) {
-      sum += Math.abs(channelData[index]);
-    }
-    energies.push(sum / (end - offset));
-  }
-
-  const sorted = [...energies].sort((a, b) => a - b);
-  const threshold = sorted[Math.floor(sorted.length * 0.86)] || 0;
-  const peaks = [];
-  for (let index = 1; index < energies.length - 1; index += 1) {
-    const current = energies[index];
-    if (current > threshold && current >= energies[index - 1] && current >= energies[index + 1]) {
-      peaks.push(index);
-    }
-  }
-
-  const counts = new Map();
-  for (let index = 0; index < peaks.length; index += 1) {
-    for (let lookahead = 1; lookahead <= 8; lookahead += 1) {
-      const next = peaks[index + lookahead];
-      if (next == null) {
-        break;
-      }
-      const interval = next - peaks[index];
-      if (!interval) {
-        continue;
-      }
-      const bpm = normalizeBpm((60 * sampleRate) / (interval * hopSize));
-      const rounded = Math.round(bpm * 10) / 10;
-      counts.set(rounded, (counts.get(rounded) || 0) + 1);
-    }
-  }
-
-  let winner = DEFAULT_BPM;
-  let winnerCount = -1;
-  for (const [bpm, count] of counts.entries()) {
-    if (count > winnerCount) {
-      winner = bpm;
-      winnerCount = count;
-    }
-  }
-  return winner;
 }
 
 /**
@@ -1835,14 +1824,19 @@ async function detectBpmFromFile() {
   if (!AudioContextCtor) {
     throw new Error("Web Audio API is unavailable");
   }
-  const analysisContext = new AudioContextCtor();
-  const audioBytes = await state.audio.file.arrayBuffer();
-  const audioBuffer = await analysisContext.decodeAudioData(audioBytes.slice(0));
-  const bpm = estimateBpmFromAudioBuffer(audioBuffer);
+  let bpm;
+  if (state.audio.bpmSegmentsStatus === "ready" && state.audio.bpmSegments?.length) {
+    bpm = medianBpmFromSegments(state.audio.bpmSegments);
+  } else {
+    const analysisContext = new AudioContextCtor();
+    const audioBytes = await state.audio.file.arrayBuffer();
+    const audioBuffer = await analysisContext.decodeAudioData(audioBytes.slice(0));
+    bpm = estimateBpmFromAudioBuffer(audioBuffer);
+    await analysisContext.close();
+  }
   state.playback.detectedBpm = bpm;
   commitTransportBpm(bpm, "detect-file");
   setStatus(`Detected BPM: ${bpm.toFixed(1)}`);
-  await analysisContext.close();
 }
 
 async function detectBpm() {
@@ -1876,6 +1870,9 @@ function clearAudio() {
   state.audio.file = null;
   state.audio.objectUrl = "";
   state.audio.duration = 0;
+  state.audio.bpmSegments = null;
+  state.audio.bpmSegmentsStatus = "idle";
+  fileBpmFollowLastApplyMs = 0;
   elements.audioElement.pause();
   elements.audioElement.removeAttribute("src");
   elements.audioElement.classList.add("hidden");
@@ -1906,6 +1903,7 @@ async function loadAudio(file) {
 
   connectFileSources();
   setStatus(`Loaded audio track ${file.name}.`);
+  void runFileBpmAnalysis();
 }
 
 function handleManualBpmChange() {
@@ -2039,6 +2037,24 @@ function wireEvents() {
   elements.autoDemoGridSelect?.addEventListener("change", handleAutoDemoGridChange);
 }
 
+function installTestHarness() {
+  if (new URLSearchParams(window.location.search).get("test") !== "1") {
+    return;
+  }
+  window.__PULSEHZ_TEST__ = {
+    setMockBpmSegments(segments) {
+      state.audio.bpmSegments = segments;
+      state.audio.bpmSegmentsStatus = "ready";
+    },
+    commitBpm(bpm) {
+      commitTransportBpm(bpm, "test");
+    },
+    getTransportBpm() {
+      return state.playback.bpm;
+    },
+  };
+}
+
 function initialize() {
   if (elements.autoDemoGridSelect) {
     elements.autoDemoGridSelect.value = state.autoDemo.grid;
@@ -2050,6 +2066,7 @@ function initialize() {
   wireEvents();
   syncLiveAudioButton();
   void refreshAudioInputDevices();
+  installTestHarness();
   setStatus("Browser canvas output is ready. Add video layers to begin.");
 }
 

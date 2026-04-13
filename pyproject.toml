@@ -48,6 +48,9 @@ audio = [
     "librosa>=0.10.2",
     "soundfile>=0.12.1",
 ]
+e2e = [
+    "pytest-playwright>=0.5.0",
+]
 
 [project.scripts]
 pulsehz = "pulsehz.main:main"
@@ -80,3 +83,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "e2e: browser UI tests (install: uv sync --extra e2e && playwright install chromium; run: pytest e2e/)",
+]
