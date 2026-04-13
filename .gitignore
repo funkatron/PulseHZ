@@ -29,3 +29,6 @@ dist/
 # Playwright (see root conftest.py)
 .cache/
 
+# Optional local-only clip (not in demo-clips; regenerate if needed)
+public/fixture-debug.webm
+

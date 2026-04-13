@@ -1,0 +1,19 @@
+{
+  "clips": [
+    "01-testsrc-landscape.webm",
+    "02-testsrc-portrait.webm",
+    "03-smptebars.webm",
+    "04-smpte-hd.webm",
+    "05-rgb-zones.webm",
+    "06-yuv-ramps.webm",
+    "07-pal75.webm",
+    "08-pal100.webm",
+    "09-testsrc2.webm",
+    "10-life.webm",
+    "11-mandelbrot.webm",
+    "12-sierpinski.webm",
+    "13-mptestsrc.webm",
+    "14-avsync-beeps.webm",
+    "15-dual-testsrc-hstack.webm"
+  ]
+}
