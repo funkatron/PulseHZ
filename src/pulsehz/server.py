@@ -60,6 +60,8 @@ class LayerMetadata(BaseModel):
     opacity: float = Field(default=1.0, ge=0.0, le=1.0)
     """How many bars one full clip loop spans at the transport tempo (preview + FFmpeg setpts)."""
     barsPerLoop: int = Field(default=1, ge=1, le=4)
+    """Letterbox (contain) vs center-crop (cover) when mapping the clip into the output frame."""
+    canvasFit: Literal["fit", "fill"] = "fit"
 
     @field_validator("barsPerLoop")
     @classmethod
@@ -67,6 +69,14 @@ class LayerMetadata(BaseModel):
         if value in (1, 2, 4):
             return value
         return 1
+
+    @field_validator("canvasFit", mode="before")
+    @classmethod
+    def canvas_fit_coerce(cls, value: object) -> str:
+        if value is None or value == "":
+            return "fit"
+        s = str(value).lower()
+        return "fill" if s == "fill" else "fit"
 
 
 class TransportSettings(BaseModel):

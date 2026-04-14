@@ -130,6 +130,20 @@ def test_build_filter_complex_supports_multiple_layers():
     assert "format=yuva444p10le[outv]" in filter_complex
 
 
+def test_build_filter_complex_canvas_fill_uses_increase_and_crop():
+    filter_complex = build_filter_complex(
+        layers=[{"blendMode": "normal", "sourceDurationSeconds": 4.0, "canvasFit": "fill"}],
+        width=1920,
+        height=1080,
+        frame_rate=60,
+        bar_duration_seconds=2.0,
+        render_duration_seconds=2.0,
+    )
+    assert "force_original_aspect_ratio=increase" in filter_complex
+    assert "crop=1920:1080" in filter_complex
+    assert "pad=1920:1080" not in filter_complex
+
+
 def test_build_filter_complex_black_backdrop_uses_solid_plate():
     filter_complex = build_filter_complex(
         layers=[{"blendMode": "multiply", "sourceDurationSeconds": 2.0}],

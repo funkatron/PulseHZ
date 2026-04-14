@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable, Literal, Sequence
 
 BackdropKind = Literal["black", "white", "transparent"]
+CanvasFitKind = Literal["fit", "fill"]
 
 
 BLEND_MODE_MAP = {
@@ -84,6 +85,27 @@ def _letterbox_pad_color(backdrop: BackdropKind) -> str:
     return "0x00000000"
 
 
+def _normalize_canvas_fit(raw: object) -> CanvasFitKind:
+    if isinstance(raw, str) and raw.lower() == "fill":
+        return "fill"
+    return "fit"
+
+
+def _layer_scale_geometry_filter(
+    width: int, height: int, pad_color: str, canvas_fit: CanvasFitKind
+) -> str:
+    """Return vf segment after fps=… up to (but not including) setsar=1."""
+    if canvas_fit == "fill":
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={width}:{height},format=rgba,"
+        )
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"format=rgba,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:{pad_color},"
+    )
+
+
 def build_filter_complex(
     layers: Sequence[dict],
     width: int,
@@ -101,9 +123,10 @@ def build_filter_complex(
     ``transparent`` matches the historical graph: the first video file is input 0 and acts
     as the compositing base (no solid plate).
 
-    Each video layer is scaled with aspect preserved and letterboxed to the output size
-    (``force_original_aspect_ratio=decrease`` + ``pad``), matching preview ``object-fit:
-    contain`` behavior.
+    Each video layer uses ``canvasFit`` from layer metadata:
+
+    - ``fit`` (default): ``force_original_aspect_ratio=decrease`` + ``pad`` (letterbox / contain).
+    - ``fill``: ``force_original_aspect_ratio=increase`` + ``crop`` (center crop / cover).
     """
     if not layers:
         raise ValueError("at least one layer is required")
@@ -136,10 +159,11 @@ def build_filter_complex(
         in_idx = index + (1 if has_solid else 0)
         source_label = f"vl{index}"
         pad_color = _letterbox_pad_color(backdrop)
+        canvas_fit = _normalize_canvas_fit(layer.get("canvasFit"))
+        geo = _layer_scale_geometry_filter(width, height, pad_color, canvas_fit)
         filter_parts.append(
             f"[{in_idx}:v]fps={frame_rate},"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
-            f"format=rgba,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:{pad_color},"
+            f"{geo}"
             f"setsar=1,setpts={speed_factor:.6f}*PTS,trim=duration={render_duration_seconds:.6f},"
             f"setpts=PTS-STARTPTS[{source_label}]"
         )
@@ -189,6 +213,7 @@ def iter_video_layers(layers: Iterable[dict]) -> list[dict]:
                     "blendMode": validate_blend_mode(layer["blendMode"]),
                     "sourceDurationSeconds": layer.get("sourceDurationSeconds"),
                     "barsPerLoop": layer.get("barsPerLoop", 1),
+                    "canvasFit": _normalize_canvas_fit(layer.get("canvasFit")),
                 }
             )
     return normalized

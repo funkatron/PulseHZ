@@ -13,9 +13,9 @@ import {
 
 const MAX_LAYERS = 4;
 
-/** Bitmap size for layer slot thumbnails (CSS scales the canvas). */
-const SLOT_THUMB_BITMAP_W = 320;
-const SLOT_THUMB_BITMAP_H = 180;
+/** Square bitmap for layer slot thumbnails (CSS scales the canvas). */
+const SLOT_THUMB_BITMAP_W = 256;
+const SLOT_THUMB_BITMAP_H = 256;
 
 /** Manual BPM `input` is debounced so typing does not spam the transport; arrow keys still feel responsive. */
 const MANUAL_BPM_INPUT_DEBOUNCE_MS = 120;
@@ -537,6 +537,8 @@ function createLayerState(id) {
     video: document.createElement("video"),
     duration: 0,
     ready: false,
+    /** @type {"fit" | "fill"} — letterbox vs center-crop into the output canvas. */
+    canvasFit: /** @type {"fit" | "fill"} */ ("fit"),
     /** @type {1 | 2 | 4} */
     barsPerLoop: 1,
     /** If true, "Clip loop" was chosen manually and tempo changes won't re-infer. */
@@ -1099,6 +1101,25 @@ function drawMediaContain(ctx, media, cw, ch) {
   ctx.drawImage(media, 0, 0, vw, vh, dx, dy, dw, dh);
 }
 
+/**
+ * Uniform scale + center crop — matches CSS object-fit: **cover** (fills frame, may clip).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {HTMLVideoElement | HTMLImageElement} media
+ */
+function drawMediaCover(ctx, media, cw, ch) {
+  const vw = media.videoWidth || media.width || 0;
+  const vh = media.videoHeight || media.height || 0;
+  if (!vw || !vh) {
+    return;
+  }
+  const scale = Math.max(cw / vw, ch / vh);
+  const sw = cw / scale;
+  const sh = ch / scale;
+  const sx = (vw - sw) / 2;
+  const sy = (vh - sh) / 2;
+  ctx.drawImage(media, sx, sy, sw, sh, 0, 0, cw, ch);
+}
+
 /** Keep decode `<video>` under the off-screen staging host (not in layer cards). */
 function mountLayerVideoInStaging(layer) {
   const host = ensureVideoLoadStaging();
@@ -1226,7 +1247,11 @@ function drawPreview(transportSeconds) {
     scratchCtx.globalCompositeOperation = "source-over";
     scratchCtx.globalAlpha = 1;
     scratchCtx.clearRect(0, 0, cw, ch);
-    drawMediaContain(scratchCtx, layer.video, cw, ch);
+    if (layer.canvasFit === "fill") {
+      drawMediaCover(scratchCtx, layer.video, cw, ch);
+    } else {
+      drawMediaContain(scratchCtx, layer.video, cw, ch);
+    }
 
     const opacity = resolveModulatedLayerOpacity(layer, transportSeconds, bpm, modulationRoutes);
 
@@ -1359,6 +1384,7 @@ function clearLayer(id) {
   layer.barsPerLoop = 1;
   layer.barsPerLoopLocked = false;
   layer.opacity = 1;
+  layer.canvasFit = "fit";
   layer.slotThumbCanvas = null;
   layer.video.removeAttribute("src");
   layer.video.load();
@@ -1373,19 +1399,34 @@ function renderLayers() {
   for (const layer of state.layers) {
     const card = document.createElement("section");
     card.className = "panel layer-card";
+    card.setAttribute("data-layer-id", String(layer.id));
+    card.tabIndex = 0;
+
+    const fullName = layer.file ? layer.file.name : "";
+    const shortName =
+      layer.file && layer.file.name.length > 14
+        ? `${layer.file.name.slice(0, 12)}…`
+        : layer.file
+          ? layer.file.name
+          : "Empty";
 
     const header = document.createElement("div");
     header.className = "layer-header";
-    header.innerHTML = `<strong>Layer ${layer.id}</strong><span class="muted">${layer.file ? layer.file.name : "Empty"}</span>`;
+    header.innerHTML = `<strong>L${layer.id}</strong><span class="muted"></span>`;
+    const mutedEl = header.querySelector(".muted");
+    if (mutedEl instanceof HTMLElement) {
+      mutedEl.textContent = shortName;
+      mutedEl.title = fullName;
+    }
 
-    const slot = document.createElement("label");
+    const slot = document.createElement("div");
     slot.className = "layer-slot";
-    slot.setAttribute("data-layer-id", String(layer.id));
 
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.accept = "video/*";
     fileInput.className = "hidden";
+    fileInput.id = `layer-file-${layer.id}`;
     fileInput.addEventListener("change", async (event) => {
       const input = event.target;
       const [file] = input.files || [];
@@ -1404,7 +1445,16 @@ function renderLayers() {
       }
     });
 
-    slot.appendChild(fileInput);
+    const thumbArea = document.createElement("label");
+    thumbArea.className = "layer-slot-thumb-area";
+    thumbArea.setAttribute("for", fileInput.id);
+
+    const thumbWrap = document.createElement("div");
+    thumbWrap.className = "layer-slot-thumb-wrap";
+
+    thumbArea.appendChild(fileInput);
+    thumbArea.appendChild(thumbWrap);
+    slot.appendChild(thumbArea);
 
     if (layer.file) {
       mountLayerVideoInStaging(layer);
@@ -1420,19 +1470,20 @@ function renderLayers() {
       if (tctx) {
         drawLayerSlotPlaceholder(tctx, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
       }
-      slot.appendChild(thumb);
+      thumbWrap.appendChild(thumb);
       queueSlotThumbPaint(layer);
 
       const meta = document.createElement("div");
       meta.className = "layer-slot-meta";
       const bp = normalizeBarsPerLoop(layer.barsPerLoop);
-      meta.textContent = `${layer.duration.toFixed(2)}s · ${bp === 1 ? "1-bar" : `${bp}-bar`} loop`;
-      slot.appendChild(meta);
+      meta.textContent = `${layer.duration.toFixed(2)}s · ${bp === 1 ? "1" : bp} bar`;
+      thumbWrap.appendChild(meta);
     } else {
+      layer.slotThumbCanvas = null;
       const empty = document.createElement("div");
       empty.className = "layer-slot-empty";
-      empty.textContent = `Drop or pick a video for layer ${layer.id}`;
-      slot.appendChild(empty);
+      empty.textContent = "Drop or pick clip";
+      thumbWrap.appendChild(empty);
     }
 
     slot.addEventListener("dragover", (event) => {
@@ -1455,24 +1506,71 @@ function renderLayers() {
       }
     });
 
-    const controls = document.createElement("div");
-    controls.className = "layer-actions";
+    const prime = document.createElement("div");
+    prime.className = "layer-controls-prime";
 
-    const rowBlend = document.createElement("div");
-    rowBlend.className = "layer-actions-row";
+    const fitGroup = document.createElement("div");
+    fitGroup.className = "layer-canvas-fit";
+    fitGroup.setAttribute("role", "radiogroup");
+    fitGroup.setAttribute("aria-label", `Layer ${layer.id} canvas fit`);
+
+    const btnFit = document.createElement("button");
+    btnFit.type = "button";
+    btnFit.className = "layer-canvas-fit__btn";
+    btnFit.textContent = "Fit";
+    btnFit.setAttribute("role", "radio");
+
+    const btnFill = document.createElement("button");
+    btnFill.type = "button";
+    btnFill.className = "layer-canvas-fit__btn";
+    btnFill.textContent = "Fill";
+    btnFill.setAttribute("role", "radio");
+
+    const syncFitButtons = () => {
+      const isFit = layer.canvasFit !== "fill";
+      btnFit.classList.toggle("is-selected", isFit);
+      btnFill.classList.toggle("is-selected", !isFit);
+      btnFit.setAttribute("aria-checked", String(isFit));
+      btnFill.setAttribute("aria-checked", String(!isFit));
+    };
+    syncFitButtons();
+    btnFit.addEventListener("click", () => {
+      layer.canvasFit = "fit";
+      syncFitButtons();
+      drawPreview(getTransportSeconds());
+    });
+    btnFill.addEventListener("click", () => {
+      layer.canvasFit = "fill";
+      syncFitButtons();
+      drawPreview(getTransportSeconds());
+    });
+    fitGroup.appendChild(btnFit);
+    fitGroup.appendChild(btnFill);
+
     const blendSelect = document.createElement("select");
     blendSelect.className = "select";
     blendSelect.setAttribute("data-blend-layer", String(layer.id));
+    blendSelect.setAttribute("aria-label", `Layer ${layer.id} blend mode`);
     blendSelect.innerHTML = SUPPORTED_BLEND_MODES.map(
       (mode) => `<option value="${mode}">${mode}</option>`,
     ).join("");
     blendSelect.value = layer.blendMode;
+
     const clearBtn = document.createElement("button");
     clearBtn.type = "button";
     clearBtn.className = "button button-danger";
     clearBtn.textContent = "Clear";
-    rowBlend.appendChild(blendSelect);
-    rowBlend.appendChild(clearBtn);
+
+    prime.appendChild(fitGroup);
+    prime.appendChild(blendSelect);
+    prime.appendChild(clearBtn);
+
+    const more = document.createElement("details");
+    more.className = "layer-controls-more";
+    const moreSum = document.createElement("summary");
+    moreSum.textContent = "Layer options";
+    const moreBody = document.createElement("div");
+    moreBody.className = "layer-controls-more__body";
 
     const rowBars = document.createElement("div");
     rowBars.className = "layer-actions-row layer-bars-row";
@@ -1530,9 +1628,15 @@ function renderLayers() {
     rowOpacity.appendChild(opacityRange);
     rowOpacity.appendChild(opacityValue);
 
-    controls.appendChild(rowBlend);
-    controls.appendChild(rowBars);
-    controls.appendChild(rowOpacity);
+    moreBody.appendChild(rowBars);
+    moreBody.appendChild(rowOpacity);
+    more.appendChild(moreSum);
+    more.appendChild(moreBody);
+
+    const controls = document.createElement("div");
+    controls.className = "layer-actions";
+    controls.appendChild(prime);
+    controls.appendChild(more);
 
     card.appendChild(header);
     card.appendChild(slot);
@@ -1582,6 +1686,7 @@ async function loadVideoLayer(id, file, options = {}) {
     layer.ready = false;
     layer.barsPerLoop = 1;
     layer.barsPerLoopLocked = false;
+    layer.canvasFit = "fit";
     if (layer.video.parentNode) {
       layer.video.remove();
     }
@@ -1725,6 +1830,7 @@ function serializeProjectState() {
       sourceName: layer.file ? layer.file.name : null,
       sourceDurationSeconds: layer.file ? layer.duration : null,
       barsPerLoop: normalizeBarsPerLoop(layer.barsPerLoop),
+      canvasFit: layer.canvasFit === "fill" ? "fill" : "fit",
     })),
     controls: structuredClone(state.controls),
   };
@@ -2126,6 +2232,92 @@ function toggleDemoLfoOpacity() {
   drawPreview(getTransportSeconds());
 }
 
+let clipStripKeyboardInstalled = false;
+
+function isEditableKeyboardTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    tag === "OPTION" ||
+    target.getAttribute("contenteditable") === "true"
+  );
+}
+
+function installClipStripKeyboard() {
+  if (clipStripKeyboardInstalled) {
+    return;
+  }
+  clipStripKeyboardInstalled = true;
+  document.addEventListener("keydown", (ev) => {
+    if (isEditableKeyboardTarget(ev.target)) {
+      return;
+    }
+    const key = ev.key;
+    if (key === "1" || key === "2" || key === "3" || key === "4") {
+      const card = document.querySelector(`.layer-card[data-layer-id="${key}"]`);
+      if (card instanceof HTMLElement) {
+        card.focus();
+        ev.preventDefault();
+      }
+      return;
+    }
+    if (key === "f" || key === "F") {
+      const card = document.activeElement?.closest?.(".layer-card");
+      if (!(card instanceof HTMLElement)) {
+        return;
+      }
+      const id = Number(card.getAttribute("data-layer-id"));
+      const layer = state.layers[id - 1];
+      if (!layer) {
+        return;
+      }
+      layer.canvasFit = layer.canvasFit === "fill" ? "fit" : "fill";
+      renderLayers();
+      drawPreview(getTransportSeconds());
+      document.querySelector(`.layer-card[data-layer-id="${String(id)}"]`)?.focus();
+      ev.preventDefault();
+      return;
+    }
+    if (key === "Backspace" || key === "Delete") {
+      const card = document.activeElement?.closest?.(".layer-card");
+      if (!(card instanceof HTMLElement)) {
+        return;
+      }
+      const id = Number(card.getAttribute("data-layer-id"));
+      if (!Number.isFinite(id) || id < 1) {
+        return;
+      }
+      clearLayer(id);
+      ev.preventDefault();
+      return;
+    }
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      const card = document.activeElement?.closest?.(".layer-card");
+      if (!(card instanceof HTMLElement)) {
+        return;
+      }
+      const id = Number(card.getAttribute("data-layer-id"));
+      if (!Number.isFinite(id)) {
+        return;
+      }
+      const next = key === "ArrowLeft" ? id - 1 : id + 1;
+      if (next < 1 || next > MAX_LAYERS) {
+        return;
+      }
+      const nextCard = document.querySelector(`.layer-card[data-layer-id="${String(next)}"]`);
+      if (nextCard instanceof HTMLElement) {
+        nextCard.focus();
+        ev.preventDefault();
+      }
+    }
+  });
+}
+
 function wireEvents() {
   elements.outputTierSelect?.addEventListener("change", handleOutputSettingsChange);
   elements.outputAspectSelect?.addEventListener("change", handleOutputSettingsChange);
@@ -2165,6 +2357,7 @@ function wireEvents() {
   elements.exportWebButton.addEventListener("click", handleWebExportClick);
   elements.demoLfoOpacityButton?.addEventListener("click", toggleDemoLfoOpacity);
   elements.autoDemoGridSelect?.addEventListener("change", handleAutoDemoGridChange);
+  installClipStripKeyboard();
 }
 
 function installTestHarness() {
