@@ -488,6 +488,8 @@ function polarFromAngleDegrees(cx, cy, r, angleDeg) {
 /** @type {string} */
 let transportBeatTicksSignature = "";
 let lastMetronomeBarIndex = -1;
+/** @type {number | null} */
+let lastAnnouncedTransportBeat = null;
 /** @type {AudioContext | null} */
 let metronomeClickContext = null;
 
@@ -886,6 +888,7 @@ const elements = {
   previewDetectedBpm: document.getElementById("preview-detected-bpm"),
   previewBarDuration: document.getElementById("preview-bar-duration"),
   previewBpmMapStatus: document.getElementById("preview-bpm-map-status"),
+  transportGridAnnounce: document.getElementById("transport-grid-announce"),
   statusLine: document.getElementById("status-line"),
   previewStatus: document.getElementById("preview-status"),
   previewOutputLabel: document.getElementById("preview-output-label"),
@@ -933,6 +936,44 @@ function setStatus(message, { error = false } = {}) {
   console.log(`PulseHZ: ${message}`);
 }
 
+/**
+ * @param {string} name
+ * @param {number} max
+ */
+function truncateMiddleEllipsis(name, max) {
+  if (name.length <= max) {
+    return name;
+  }
+  return `${name.slice(0, max - 1)}…`;
+}
+
+function updateSidebarSheetKickers() {
+  const patchEl = document.getElementById("sidebar-kicker-patch");
+  const exportEl = document.getElementById("sidebar-kicker-export");
+  const statusEl = document.getElementById("sidebar-kicker-status");
+  const bpm = (state.playback.bpm || DEFAULT_BPM).toFixed(1);
+
+  if (patchEl) {
+    if (state.liveInput.active) {
+      patchEl.textContent = ` · live · ${bpm} BPM`;
+    } else if (state.audio.file?.name) {
+      patchEl.textContent = ` · ${truncateMiddleEllipsis(state.audio.file.name, 20)} · ${bpm} BPM`;
+    } else {
+      patchEl.textContent = ` · no audio file · ${bpm} BPM`;
+    }
+  }
+
+  if (exportEl) {
+    const { width, height } = getOutputDimensions(state.output.tier, state.output.aspect);
+    exportEl.textContent = ` · ${state.output.tier} · ${width}×${height}`;
+  }
+
+  if (statusEl) {
+    const n = state.layers.filter((l) => l.file).length;
+    statusEl.textContent = ` · ${n} clip${n === 1 ? "" : "s"}`;
+  }
+}
+
 function updateTransportDisplays(transportSeconds = 0) {
   const barSeconds = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
   const phase = barSeconds > 0 ? transportSeconds % barSeconds : 0;
@@ -967,6 +1008,25 @@ function updateTransportDisplays(transportSeconds = 0) {
             : "";
   }
 
+  const beatDur =
+    barSeconds > 0 ? barSeconds / (state.playback.beatsPerBar || 4) : 0;
+  const globalBeat = beatDur > 0 ? Math.floor(transportSeconds / beatDur + 1e-9) : 0;
+  const ann = elements.transportGridAnnounce;
+  if (ann && beatDur > 0) {
+    if (state.playback.isPlaying) {
+      if (lastAnnouncedTransportBeat !== globalBeat) {
+        lastAnnouncedTransportBeat = globalBeat;
+        const beats = state.playback.beatsPerBar || 4;
+        const beatInBar = (globalBeat % beats) + 1;
+        const barNumber = Math.floor(globalBeat / beats) + 1;
+        ann.textContent = `Bar ${barNumber}, beat ${beatInBar}`;
+      }
+    } else {
+      lastAnnouncedTransportBeat = globalBeat;
+    }
+  }
+
+  updateSidebarSheetKickers();
   updateTransportBeatRing(transportSeconds);
 }
 
@@ -1626,6 +1686,7 @@ async function startPlayback() {
 
   state.playback.isPlaying = true;
   state.playback.startedAtMs = performance.now();
+  lastAnnouncedTransportBeat = null;
 
   if (state.audio.file) {
     state.playback.usingAudioClock = true;

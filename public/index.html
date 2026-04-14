@@ -21,7 +21,7 @@
         rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.2.5/700.css"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260414ux" />
+    <link rel="stylesheet" href="./styles.css?v=20260414ux2" />
 </head>
 <body>
     <div class="app-shell">
@@ -77,7 +77,10 @@
             </section>
 
             <details class="sidebar-details sidebar-sheet">
-                <summary class="sidebar-details__summary">Patch &amp; calibration</summary>
+                <summary class="sidebar-details__summary">
+                    Patch &amp; calibration
+                    <span id="sidebar-kicker-patch" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
                 <div class="sidebar-details__body sidebar-sheet__body">
                     <section class="section section--nested">
                         <h3 class="sidebar-subhead">Audio</h3>
@@ -171,7 +174,10 @@
             </details>
 
             <details class="sidebar-details sidebar-sheet">
-                <summary class="sidebar-details__summary">Export</summary>
+                <summary class="sidebar-details__summary">
+                    Export
+                    <span id="sidebar-kicker-export" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
                 <div class="sidebar-details__body sidebar-sheet__body">
                     <div class="button-row">
                         <button id="export-high-button" class="button button-accent" type="button">Export ProRes</button>
@@ -181,7 +187,10 @@
             </details>
 
             <details class="sidebar-details sidebar-sheet">
-                <summary class="sidebar-details__summary">Status &amp; fine telemetry</summary>
+                <summary class="sidebar-details__summary">
+                    Status &amp; fine telemetry
+                    <span id="sidebar-kicker-status" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
                 <div class="sidebar-details__body sidebar-sheet__body">
                     <div class="stat-grid">
                         <div class="stat">
@@ -213,6 +222,12 @@
                     <canvas id="preview-canvas" class="preview-canvas" width="1920" height="1080"></canvas>
                     <div id="preview-status" class="preview-status">Drop video clips into the layer slots to build a live composite.</div>
                     <div class="preview-instruments" aria-label="Transport instruments">
+                        <div
+                            id="transport-grid-announce"
+                            class="visually-hidden"
+                            aria-live="polite"
+                            aria-atomic="true"
+                        ></div>
                         <div class="preview-telemetry" title="Live audio level and tempo readouts">
                             <div class="preview-telemetry__row">
                                 <span class="preview-telemetry__label">Level</span>
@@ -266,6 +281,6 @@
         </main>
     </div>
 
-    <script type="module" src="./app.js?v=20260414ux"></script>
+    <script type="module" src="./app.js?v=20260414ux2"></script>
 </body>
 </html>
