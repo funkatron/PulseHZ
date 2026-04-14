@@ -14,6 +14,10 @@ __pycache__/
 
 # Editor
 .vscode/
+.cursor/
+
+# Large optional local video fixtures (not used by CI)
+tests/fixtures/DABN*.mov
 
 # Node
 node_modules/
