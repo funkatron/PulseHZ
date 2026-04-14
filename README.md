@@ -84,7 +84,7 @@ Root `conftest.py` sets `PLAYWRIGHT_BROWSERS_PATH` to `.cache/playwright` (gitig
 
 ### Demo WebM clips
 
-Bundled VP9 patterns live in **`public/demo-clips/`** (see **`manifest.json`**). Regenerate with **`bash scripts/generate-demo-clips.sh`** (needs FFmpeg + libvpx-vp9). For dev-only autoload via URL query parameters (`?autoload=first`, `all`, a path to a clip, etc.), see **[docs/demo-clips.md](docs/demo-clips.md)**.
+Bundled VP9 patterns live in **`public/demo-clips/`** (see **`manifest.json`**). Regenerate with **`bash scripts/generate-demo-clips.sh`** (needs FFmpeg + libvpx-vp9). For dev-only autoload (`?autoload=first`, `all`, a path to a clip, etc.) and **loopback default** loading of three demo layers when you open `/app/` with no query, see **[docs/demo-clips.md](docs/demo-clips.md)**.
 
 ---
 

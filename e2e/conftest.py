@@ -72,4 +72,5 @@ def pulsehz_server():
 
 @pytest.fixture
 def app_page_url(pulsehz_server: str) -> str:
+    """Base app URL without query (tests append their own `?…` / `&…`)."""
     return f"{pulsehz_server}/app/"

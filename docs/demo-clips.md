@@ -25,8 +25,14 @@ This overwrites `public/demo-clips/*.webm`, then writes `public/demo-clips/manif
 
 With the app served (e.g. `uv run pulsehz-server` on port **6066**), open the shell under **`/app/`** and append a query string. Only same-origin, allowlisted paths are accepted (see `resolveAutoloadWebmPath` in `public/app.js`).
 
+### Loopback startup (no query)
+
+On **`localhost`**, **`127.0.0.1`**, or **`[::1]`** only, opening **`/app/`** with **no** `autoload` parameter loads the first **min(3, N)** clips from `manifest.json` into layers **1–3** (small dev “startup project”). Use **`?autoload=off`** (or **`none`**) for an empty stack on loopback.
+
 | `?autoload=` | Behavior |
 |----------------|----------|
+| *(omitted, loopback only)* | First **min(3, N)** manifest clips → layers **1–3**. |
+| `off` or `none` | Skip all demo loading (including that startup behavior). |
 | `1` or `first` | First entry in `manifest.json` → **layer 1** (stable for smoke tests). |
 | `random` | Random clip from manifest → layer 1. |
 | `all` | First **min(4, N)** clips → layers **1–4** (batch). |
