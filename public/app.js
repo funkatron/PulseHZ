@@ -23,6 +23,55 @@ let manualBpmInputTimer = null;
 /** Throttle commits from file segment map (same ballpark as live estimator). */
 let fileBpmFollowLastApplyMs = 0;
 
+/** Debounced automatic BPM so layer sync / composite does not jump on noisy estimates. */
+const COMPOSITOR_BPM_DEBOUNCE_MS = 480;
+const COMPOSITOR_BPM_MIN_DELTA = 0.45;
+let compositorBpmDebounceTimer = null;
+/** @type {{ bpm: number, source: string } | null} */
+let compositorBpmPending = null;
+
+function cancelCompositorBpmDebounce() {
+  if (compositorBpmDebounceTimer !== null) {
+    clearTimeout(compositorBpmDebounceTimer);
+    compositorBpmDebounceTimer = null;
+  }
+  compositorBpmPending = null;
+}
+
+function flushCompositorBpmPending() {
+  compositorBpmDebounceTimer = null;
+  const pending = compositorBpmPending;
+  compositorBpmPending = null;
+  if (!pending) {
+    return;
+  }
+  commitTransportBpm(pending.bpm, pending.source);
+}
+
+/**
+ * Queue a BPM change from automatic sources (live estimator, file segment follower).
+ * Manual input, detect button, and audio prescan use `commitTransportBpm` directly.
+ * @param {number} nextBpm
+ * @param {string} source
+ */
+function requestDebouncedCompositorBpm(nextBpm, source) {
+  if (!Number.isFinite(nextBpm) || nextBpm <= 0) {
+    return;
+  }
+  const rounded = Math.round(nextBpm * 10) / 10;
+  if (Math.abs(rounded - state.playback.bpm) < COMPOSITOR_BPM_MIN_DELTA) {
+    return;
+  }
+  compositorBpmPending = { bpm: rounded, source };
+  if (compositorBpmDebounceTimer !== null) {
+    clearTimeout(compositorBpmDebounceTimer);
+  }
+  compositorBpmDebounceTimer = window.setTimeout(
+    flushCompositorBpmPending,
+    COMPOSITOR_BPM_DEBOUNCE_MS,
+  );
+}
+
 /**
  * HTMLMediaElement.playbackRate range is engine-specific (Chromium often ~0.0625–16; some WebViews lower).
  * Long clips need high desired rates; we clamp + walk down until the assignment sticks or we give up.
@@ -324,6 +373,7 @@ function commitTransportBpm(nextBpm, source) {
   if (!Number.isFinite(nextBpm) || nextBpm <= 0) {
     return;
   }
+  cancelCompositorBpmDebounce();
   const previousBpm = state.playback.bpm;
   if (Math.abs(nextBpm - previousBpm) < 1e-6) {
     return;
@@ -351,10 +401,15 @@ function commitTransportBpm(nextBpm, source) {
  * Decode loaded file to mono, build sliding-window BPM segments (idle-yielding).
  * Does not block load; runs in background.
  */
-async function runFileBpmAnalysis() {
+/**
+ * One-shot decode + quick BPM + segment map for the loaded audio file.
+ * @param {{ skipQuickCommit?: boolean }} [opts]
+ */
+async function runFileBpmAnalysis(opts = {}) {
   if (!state.audio.file) {
     return;
   }
+  const { skipQuickCommit = false } = opts;
   state.audio.bpmSegmentsStatus = "building";
   state.audio.bpmSegments = null;
   state.audio.analysisMono = null;
@@ -364,6 +419,11 @@ async function runFileBpmAnalysis() {
     const bytes = await state.audio.file.arrayBuffer();
     const decoded = await ctx.decodeAudioData(bytes.slice(0));
     await ctx.close();
+    if (!skipQuickCommit) {
+      const quick = estimateBpmFromAudioBuffer(decoded);
+      state.playback.detectedBpm = quick;
+      commitTransportBpm(normalizeBpm(quick), "audio-file-quick-bpm");
+    }
     const mono = downmixToMonoBuffer(decoded);
     state.audio.analysisMono = mono;
     const segments = await buildBpmSegmentsAsync(mono, {
@@ -373,6 +433,11 @@ async function runFileBpmAnalysis() {
     });
     state.audio.bpmSegments = segments;
     state.audio.bpmSegmentsStatus = "ready";
+    if (segments?.length) {
+      const med = medianBpmFromSegments(segments);
+      state.playback.detectedBpm = med;
+      commitTransportBpm(med, "audio-file-segments");
+    }
   } catch (error) {
     console.warn("PulseHZ: file BPM segment analysis failed", error);
     state.audio.bpmSegmentsStatus = "error";
@@ -407,11 +472,205 @@ function updateFileBpmFromSegments() {
   }
   fileBpmFollowLastApplyMs = now;
   state.playback.detectedBpm = rounded;
-  commitTransportBpm(rounded, "file-segments");
+  requestDebouncedCompositorBpm(rounded, "file-segments");
 }
 
 function barDurationSeconds(bpm, beatsPerBar = 4) {
   return (60 / bpm) * beatsPerBar;
+}
+
+/** @param {number} cx @param {number} cy @param {number} r @param {number} angleDeg angle from +x axis (12 o'clock = -90). */
+function polarFromAngleDegrees(cx, cy, r, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+/** @type {string} */
+let transportBeatTicksSignature = "";
+let lastMetronomeBarIndex = -1;
+/** @type {AudioContext | null} */
+let metronomeClickContext = null;
+
+function playMetronomeClick() {
+  if (!elements.metroClickToggle?.checked) {
+    return;
+  }
+  try {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) {
+      return;
+    }
+    if (!metronomeClickContext) {
+      metronomeClickContext = new Ctor();
+    }
+    const ctx = metronomeClickContext;
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "square";
+    o.frequency.value = 1180;
+    const t0 = ctx.currentTime;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.055);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + 0.06);
+  } catch {
+    /* ignore */
+  }
+}
+
+function tickMetronomeUi(transportSeconds) {
+  const bpm = state.playback.bpm || DEFAULT_BPM;
+  const beats = state.playback.beatsPerBar || 4;
+  const barSec = barDurationSeconds(bpm, beats);
+  if (barSec <= 0) {
+    return;
+  }
+  const barIdx = Math.floor(transportSeconds / barSec);
+  if (!state.playback.isPlaying) {
+    lastMetronomeBarIndex = barIdx;
+    return;
+  }
+  if (barIdx === lastMetronomeBarIndex) {
+    return;
+  }
+  lastMetronomeBarIndex = barIdx;
+  if (elements.metroVisualToggle?.checked) {
+    const wrap = elements.previewCanvasWrap;
+    if (wrap) {
+      wrap.classList.remove("preview-metronome-flash");
+      void wrap.offsetWidth;
+      wrap.classList.add("preview-metronome-flash");
+      window.setTimeout(() => wrap.classList.remove("preview-metronome-flash"), 160);
+    }
+  }
+  playMetronomeClick();
+}
+
+function updateTransportBeatRing(transportSeconds) {
+  const ticksEl = elements.transportBeatRingTicks;
+  const progEl = elements.transportBeatRingProgress;
+  if (!(ticksEl instanceof SVGGElement) || !(progEl instanceof SVGCircleElement)) {
+    return;
+  }
+  const bpm = state.playback.bpm || DEFAULT_BPM;
+  const beats = state.playback.beatsPerBar || 4;
+  const sig = `${beats}`;
+  if (sig !== transportBeatTicksSignature) {
+    transportBeatTicksSignature = sig;
+    ticksEl.replaceChildren();
+    for (let i = 0; i < beats; i += 1) {
+      const ang = -90 + (i * 360) / beats;
+      const outer = polarFromAngleDegrees(50, 50, 40, ang);
+      const inner = polarFromAngleDegrees(50, 50, 30, ang);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", String(inner.x));
+      line.setAttribute("y1", String(inner.y));
+      line.setAttribute("x2", String(outer.x));
+      line.setAttribute("y2", String(outer.y));
+      line.setAttribute("class", "transport-beat-ring__tick");
+      ticksEl.appendChild(line);
+    }
+  }
+  const barSec = barDurationSeconds(bpm, beats);
+  const phase = barSec > 0 ? transportSeconds % barSec : 0;
+  const beatIdx =
+    barSec > 0 ? Math.min(beats - 1, Math.floor(phase / (barSec / beats))) : 0;
+  const lines = ticksEl.querySelectorAll("line");
+  lines.forEach((ln, i) => {
+    ln.setAttribute(
+      "class",
+      i === beatIdx ? "transport-beat-ring__tick transport-beat-ring__tick--active" : "transport-beat-ring__tick",
+    );
+  });
+  const frac = barSec > 0 ? phase / barSec : 0;
+  progEl.setAttribute("stroke-dashoffset", String(100 - frac * 100));
+}
+
+function createLayerClipRingSvg(layer) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "layer-clip-ring");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("data-clip-ring-for", String(layer.id));
+  const n = Math.max(1, normalizeBarsPerLoop(layer.barsPerLoop));
+  const track = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  track.setAttribute("class", "layer-clip-ring__track");
+  track.setAttribute("cx", "50");
+  track.setAttribute("cy", "50");
+  track.setAttribute("r", "44");
+  track.setAttribute("pathLength", "100");
+  svg.appendChild(track);
+  for (let i = 0; i < n; i += 1) {
+    const ang = -90 + (i * 360) / n;
+    const outer = polarFromAngleDegrees(50, 50, 47, ang);
+    const inner = polarFromAngleDegrees(50, 50, 36, ang);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", String(inner.x));
+    line.setAttribute("y1", String(inner.y));
+    line.setAttribute("x2", String(outer.x));
+    line.setAttribute("y2", String(outer.y));
+    line.setAttribute("class", "layer-clip-ring__tick");
+    line.dataset.barTick = String(i);
+    svg.appendChild(line);
+  }
+  const prog = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  prog.setAttribute("class", "layer-clip-ring__progress");
+  prog.setAttribute("cx", "50");
+  prog.setAttribute("cy", "50");
+  prog.setAttribute("r", "44");
+  prog.setAttribute("pathLength", "100");
+  prog.setAttribute("stroke-dasharray", "100");
+  prog.setAttribute("stroke-dashoffset", "100");
+  svg.appendChild(prog);
+  return svg;
+}
+
+function updateLayerClipRings(transportSeconds) {
+  const playing = state.playback.isPlaying;
+  const bpm = state.playback.bpm || DEFAULT_BPM;
+  const barSec = barDurationSeconds(bpm, state.playback.beatsPerBar);
+  for (const layer of state.layers) {
+    const card = document.querySelector(`.layer-card[data-layer-id="${layer.id}"]`);
+    if (!(card instanceof HTMLElement)) {
+      continue;
+    }
+    card.classList.toggle("is-clip-playing", playing && Boolean(layer.file && layer.ready));
+    const svg = card.querySelector("svg.layer-clip-ring");
+    if (!(svg instanceof SVGSVGElement)) {
+      continue;
+    }
+    if (!layer.file) {
+      svg.classList.remove("layer-clip-ring--loading");
+      svg.dataset.clipUi = "empty";
+      continue;
+    }
+    if (layer.loading || !layer.ready) {
+      svg.classList.add("layer-clip-ring--loading");
+      svg.dataset.clipUi = "loading";
+      continue;
+    }
+    svg.classList.remove("layer-clip-ring--loading");
+    const n = normalizeBarsPerLoop(layer.barsPerLoop);
+    const loopSec = barSec * n;
+    const p = loopSec > 0 ? (transportSeconds % loopSec) / loopSec : 0;
+    const prog = svg.querySelector(".layer-clip-ring__progress");
+    if (prog instanceof SVGCircleElement) {
+      prog.setAttribute("stroke-dashoffset", String(100 - p * 100));
+    }
+    const barInLoop = Math.min(n - 1, Math.floor(p * n + 1e-9));
+    svg.querySelectorAll(".layer-clip-ring__tick").forEach((el, i) => {
+      el.setAttribute(
+        "class",
+        i <= barInLoop ? "layer-clip-ring__tick layer-clip-ring__tick--on" : "layer-clip-ring__tick",
+      );
+    });
+    svg.dataset.clipUi = playing ? "playing" : "idle";
+  }
 }
 
 /** Onset + beat-interval BPM estimator (~60fps) while live capture is active. */
@@ -524,7 +783,7 @@ function updateRealtimeBpmFromLive() {
     return;
   }
 
-  commitTransportBpm(rounded, "live-estimator");
+  requestDebouncedCompositorBpm(rounded, "live-estimator");
 }
 
 function createLayerState(id) {
@@ -537,6 +796,8 @@ function createLayerState(id) {
     video: document.createElement("video"),
     duration: 0,
     ready: false,
+    /** True while a clip file is being opened/decoded for this slot. */
+    loading: false,
     /** @type {"fit" | "fill"} — letterbox vs center-crop into the output canvas. */
     canvasFit: /** @type {"fit" | "fill"} */ ("fit"),
     /** @type {1 | 2 | 4} */
@@ -587,6 +848,8 @@ const state = {
     bpmSegments: null,
     /** @type {"idle" | "building" | "ready" | "error"} */
     bpmSegmentsStatus: "idle",
+    /** @type {"idle" | "running"} */
+    prescanStatus: "idle",
   },
   /** Editor-only: discrete steps on musical grid. Not serialized to export metadata. */
   autoDemo: {
@@ -612,7 +875,17 @@ const elements = {
   barDuration: document.getElementById("bar-duration"),
   loadedLayers: document.getElementById("loaded-layers"),
   meterBar: document.getElementById("meter-bar"),
+  meterBarPreview: document.getElementById("meter-bar-preview"),
   transportProgressBar: document.getElementById("transport-progress-bar"),
+  audioPrescanHint: document.getElementById("audio-prescan-hint"),
+  metroVisualToggle: document.getElementById("metro-visual-toggle"),
+  metroClickToggle: document.getElementById("metro-click-toggle"),
+  transportBeatRing: document.getElementById("transport-beat-ring"),
+  transportBeatRingProgress: document.getElementById("transport-beat-ring-progress"),
+  transportBeatRingTicks: document.getElementById("transport-beat-ring-ticks"),
+  previewDetectedBpm: document.getElementById("preview-detected-bpm"),
+  previewBarDuration: document.getElementById("preview-bar-duration"),
+  previewBpmMapStatus: document.getElementById("preview-bpm-map-status"),
   statusLine: document.getElementById("status-line"),
   previewStatus: document.getElementById("preview-status"),
   previewOutputLabel: document.getElementById("preview-output-label"),
@@ -672,9 +945,29 @@ function updateTransportDisplays(transportSeconds = 0) {
     ? state.playback.detectedBpm.toFixed(1)
     : "--";
   elements.loadedLayers.textContent = `${state.layers.filter((layer) => layer.file).length} / ${MAX_LAYERS}`;
-  elements.previewTransportLabel.textContent = state.playback.isPlaying
-    ? `Playing bar ${(transportSeconds / barSeconds).toFixed(2)}`
-    : "Stopped";
+  elements.previewTransportLabel.textContent = state.playback.isPlaying ? "Playing" : "Stopped";
+
+  if (elements.previewDetectedBpm) {
+    elements.previewDetectedBpm.textContent = state.playback.detectedBpm
+      ? `BPM ${state.playback.detectedBpm.toFixed(1)}`
+      : "BPM --";
+  }
+  if (elements.previewBarDuration) {
+    elements.previewBarDuration.textContent = `Bar ${barSeconds.toFixed(2)}s`;
+  }
+  if (elements.previewBpmMapStatus) {
+    const st = state.audio.bpmSegmentsStatus;
+    elements.previewBpmMapStatus.textContent =
+      st === "building"
+        ? "Tempo map: building…"
+        : st === "ready"
+          ? "Tempo map: ready"
+          : st === "error"
+            ? "Tempo map: error"
+            : "";
+  }
+
+  updateTransportBeatRing(transportSeconds);
 }
 
 function getTransportSeconds() {
@@ -1270,13 +1563,20 @@ function drawPreview(transportSeconds) {
 function updateAudioMeter() {
   if (!state.analyserNode) {
     elements.meterBar.style.width = "0%";
+    if (elements.meterBarPreview) {
+      elements.meterBarPreview.style.width = "0%";
+    }
     return;
   }
 
   const data = new Uint8Array(state.analyserNode.frequencyBinCount);
   state.analyserNode.getByteFrequencyData(data);
   const average = data.reduce((sum, value) => sum + value, 0) / data.length;
-  elements.meterBar.style.width = `${Math.min(100, (average / 255) * 100)}%`;
+  const pct = `${Math.min(100, (average / 255) * 100)}%`;
+  elements.meterBar.style.width = pct;
+  if (elements.meterBarPreview) {
+    elements.meterBarPreview.style.width = pct;
+  }
 
   updateRealtimeBpmFromLive();
 }
@@ -1289,6 +1589,8 @@ function renderLoop() {
   updateAudioMeter();
   updateFileBpmFromSegments();
   updateTransportDisplays(transportSeconds);
+  tickMetronomeUi(transportSeconds);
+  updateLayerClipRings(transportSeconds);
   state.animationFrameId = requestAnimationFrame(renderLoop);
 }
 
@@ -1356,6 +1658,7 @@ function pausePlayback() {
 
   elements.audioElement.pause();
   updateTransportDisplays(state.playback.startOffsetSeconds);
+  updateLayerClipRings(state.playback.startOffsetSeconds);
   if (state.liveInput.active) {
     startIdleLiveMeter();
   }
@@ -1381,6 +1684,7 @@ function clearLayer(id) {
   layer.objectUrl = "";
   layer.duration = 0;
   layer.ready = false;
+  layer.loading = false;
   layer.barsPerLoop = 1;
   layer.barsPerLoopLocked = false;
   layer.opacity = 1;
@@ -1461,6 +1765,9 @@ function renderLayers() {
       layer.video.controls = false;
       layer.video.playsInline = true;
 
+      const ringHost = document.createElement("div");
+      ringHost.className = "layer-slot-thumb-ring-host";
+
       const thumb = document.createElement("canvas");
       thumb.className = "layer-slot-thumb";
       thumb.width = SLOT_THUMB_BITMAP_W;
@@ -1470,7 +1777,9 @@ function renderLayers() {
       if (tctx) {
         drawLayerSlotPlaceholder(tctx, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
       }
-      thumbWrap.appendChild(thumb);
+      ringHost.appendChild(thumb);
+      ringHost.appendChild(createLayerClipRingSvg(layer));
+      thumbWrap.appendChild(ringHost);
       queueSlotThumbPaint(layer);
 
       const meta = document.createElement("div");
@@ -1485,6 +1794,8 @@ function renderLayers() {
       empty.textContent = "Drop or pick clip";
       thumbWrap.appendChild(empty);
     }
+
+    card.setAttribute("aria-busy", layer.file && !layer.ready ? "true" : "false");
 
     slot.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -1675,6 +1986,8 @@ async function loadVideoLayer(id, file, options = {}) {
   layer.video.preload = "metadata";
 
   ensureVideoLoadStaging().appendChild(layer.video);
+  layer.loading = true;
+  renderLayers();
 
   let previewViaTranscode = false;
 
@@ -1684,6 +1997,7 @@ async function loadVideoLayer(id, file, options = {}) {
     layer.objectUrl = "";
     layer.duration = 0;
     layer.ready = false;
+    layer.loading = false;
     layer.barsPerLoop = 1;
     layer.barsPerLoopLocked = false;
     layer.canvasFit = "fit";
@@ -1732,6 +2046,7 @@ async function loadVideoLayer(id, file, options = {}) {
 
   layer.duration = layer.video.duration || 0;
   layer.ready = true;
+  layer.loading = false;
   const bpmForInfer = Number(elements.manualBpm.value) || state.playback.bpm || DEFAULT_BPM;
   const barSecForInfer = barDurationSeconds(bpmForInfer, state.playback.beatsPerBar);
   layer.barsPerLoop = inferBarsPerLoopFromDuration(layer.duration, barSecForInfer);
@@ -2108,6 +2423,11 @@ function clearAudio() {
   state.audio.analysisMono = null;
   state.audio.bpmSegments = null;
   state.audio.bpmSegmentsStatus = "idle";
+  state.audio.prescanStatus = "idle";
+  if (elements.audioPrescanHint) {
+    elements.audioPrescanHint.classList.add("hidden");
+    elements.audioPrescanHint.textContent = "";
+  }
   fileBpmFollowLastApplyMs = 0;
   elements.audioElement.pause();
   elements.audioElement.removeAttribute("src");
@@ -2138,8 +2458,23 @@ async function loadAudio(file) {
   });
 
   connectFileSources();
+  state.audio.prescanStatus = "running";
+  if (elements.audioPrescanHint) {
+    elements.audioPrescanHint.classList.remove("hidden");
+    elements.audioPrescanHint.textContent = "Analyzing tempo (may take a couple seconds)…";
+  }
+  setStatus(`Analyzing ${file.name} for tempo…`);
+  try {
+    await runFileBpmAnalysis({ skipQuickCommit: false });
+  } catch (error) {
+    console.warn("PulseHZ: audio prescan failed", error);
+  } finally {
+    state.audio.prescanStatus = "idle";
+    if (elements.audioPrescanHint) {
+      elements.audioPrescanHint.classList.add("hidden");
+    }
+  }
   setStatus(`Loaded audio track ${file.name}.`);
-  void runFileBpmAnalysis();
 }
 
 function handleManualBpmChange() {
@@ -2357,6 +2692,16 @@ function wireEvents() {
   elements.exportWebButton.addEventListener("click", handleWebExportClick);
   elements.demoLfoOpacityButton?.addEventListener("click", toggleDemoLfoOpacity);
   elements.autoDemoGridSelect?.addEventListener("change", handleAutoDemoGridChange);
+  elements.metroClickToggle?.addEventListener("change", async () => {
+    try {
+      await resumeAudioContext();
+      if (elements.metroClickToggle?.checked && metronomeClickContext?.state === "suspended") {
+        await metronomeClickContext.resume();
+      }
+    } catch {
+      /* ignore */
+    }
+  });
   installClipStripKeyboard();
 }
 
@@ -2385,6 +2730,7 @@ function initialize() {
   syncOutputControlsFromState();
   renderLayers();
   updateTransportDisplays(0);
+  updateLayerClipRings(0);
   drawPreview(0);
   wireEvents();
   syncLiveAudioButton();
