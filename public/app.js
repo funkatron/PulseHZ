@@ -30,6 +30,99 @@ let compositorBpmDebounceTimer = null;
 /** @type {{ bpm: number, source: string } | null} */
 let compositorBpmPending = null;
 
+/** FCP-style: settings + last-known filenames only (no clip/audio blobs in browser storage). */
+const AUTOSAVE_LS_KEY = "pulsehz:autosave-v1";
+const AUTOSAVE_DEBOUNCE_MS = 650;
+let autosaveTimer = null;
+/** When true, `scheduleAutosave` no-ops (e.g. during restore). */
+let suppressAutosave = false;
+/** Skip loopback demo startup once if last autosave had media attached (avoid clobbering empty slots). */
+let skipNextDefaultDevAutoload = false;
+
+const CLIP_IDB_NAME = "pulsehz-clip-cache-v1";
+const CLIP_IDB_VER = 1;
+
+/**
+ * @returns {Promise<IDBDatabase>}
+ */
+function openPulsehzClipIdb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const req = indexedDB.open(CLIP_IDB_NAME, CLIP_IDB_VER);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("blobs")) {
+        db.createObjectStore("blobs");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+  });
+}
+
+/**
+ * @param {string} key
+ * @returns {Promise<Blob | File | null>}
+ */
+async function idbGetClipBlob(key) {
+  if (!window.indexedDB) {
+    return null;
+  }
+  try {
+    const db = await openPulsehzClipIdb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("blobs", "readonly");
+      const r = tx.objectStore("blobs").get(key);
+      r.onsuccess = () => {
+        db.close();
+        resolve(r.result ?? null);
+      };
+      r.onerror = () => reject(r.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function persistClipBlobsToIdb() {
+  if (!window.indexedDB) {
+    return;
+  }
+  try {
+    const db = await openPulsehzClipIdb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("blobs", "readwrite");
+      const store = tx.objectStore("blobs");
+      for (let i = 0; i < MAX_LAYERS; i += 1) {
+        const id = i + 1;
+        const layer = state.layers[i];
+        const key = `layer-${id}`;
+        if (!layer.file || layer.clipPersist?.kind === "demo") {
+          store.delete(key);
+        } else {
+          store.put(layer.file, key);
+        }
+      }
+      if (state.audio.file) {
+        store.put(state.audio.file, "audio");
+      } else {
+        store.delete("audio");
+      }
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+    });
+  } catch (e) {
+    console.warn("PulseHZ: IndexedDB clip save failed", e);
+  }
+}
+
 function cancelCompositorBpmDebounce() {
   if (compositorBpmDebounceTimer !== null) {
     clearTimeout(compositorBpmDebounceTimer);
@@ -395,6 +488,7 @@ function commitTransportBpm(nextBpm, source) {
     previousBpm,
     source,
   });
+  scheduleAutosave();
 }
 
 /**
@@ -548,7 +642,7 @@ function tickMetronomeUi(transportSeconds) {
       wrap.classList.remove("preview-metronome-flash");
       void wrap.offsetWidth;
       wrap.classList.add("preview-metronome-flash");
-      window.setTimeout(() => wrap.classList.remove("preview-metronome-flash"), 160);
+      window.setTimeout(() => wrap.classList.remove("preview-metronome-flash"), 340);
     }
   }
   playMetronomeClick();
@@ -806,6 +900,11 @@ function createLayerState(id) {
     barsPerLoop: 1,
     /** If true, "Clip loop" was chosen manually and tempo changes won't re-infer. */
     barsPerLoopLocked: false,
+    /**
+     * How to restore this slot after reload: same-origin demo path (re-fetch) or IndexedDB user upload.
+     * @type {{ kind: "demo"; path: string } | { kind: "idb"; name: string; mime: string } | null}
+     */
+    clipPersist: null,
   };
 }
 
@@ -852,6 +951,9 @@ const state = {
     bpmSegmentsStatus: "idle",
     /** @type {"idle" | "running"} */
     prescanStatus: "idle",
+    /** Cached file identity for autosave (blob in IndexedDB). */
+    /** @type {{ kind: "idb"; name: string; mime: string } | null} */
+    persist: null,
   },
   /** Editor-only: discrete steps on musical grid. Not serialized to export metadata. */
   autoDemo: {
@@ -1142,6 +1244,7 @@ function handleAutoDemoGridChange() {
   if (elements.autoDemoGridSelect) {
     elements.autoDemoGridSelect.value = state.autoDemo.grid;
   }
+  scheduleAutosave();
 }
 
 function ensureAudioBase() {
@@ -1753,9 +1856,11 @@ function clearLayer(id) {
   layer.slotThumbCanvas = null;
   layer.video.removeAttribute("src");
   layer.video.load();
+  layer.clipPersist = null;
   renderLayers();
   drawPreview(getTransportSeconds());
   updateTransportDisplays(getTransportSeconds());
+  scheduleAutosave();
 }
 
 function renderLayers() {
@@ -1910,11 +2015,13 @@ function renderLayers() {
       layer.canvasFit = "fit";
       syncFitButtons();
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
     });
     btnFill.addEventListener("click", () => {
       layer.canvasFit = "fill";
       syncFitButtons();
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
     });
     fitGroup.appendChild(btnFit);
     fitGroup.appendChild(btnFill);
@@ -1969,6 +2076,7 @@ function renderLayers() {
       syncLayerVideos(getTransportSeconds());
       renderLayers();
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
     });
     rowBars.appendChild(barsLabel);
     rowBars.appendChild(barsSelect);
@@ -1994,6 +2102,7 @@ function renderLayers() {
       layer.opacity = Number(opacityRange.value) / 100;
       opacityValue.textContent = `${opacityRange.value}%`;
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
     };
     opacityRange.addEventListener("input", syncOpacity);
     rowOpacity.appendChild(opacityLabel);
@@ -2018,6 +2127,7 @@ function renderLayers() {
     blendSelect.addEventListener("change", (event) => {
       layer.blendMode = event.target.value;
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
     });
 
     clearBtn.addEventListener("click", () => clearLayer(layer.id));
@@ -2027,10 +2137,13 @@ function renderLayers() {
 /**
  * @param {number} id
  * @param {File} file
- * @param {{ devAutoloadBatch?: boolean }} [options]
+ * @param {{
+ *   devAutoloadBatch?: boolean;
+ *   clipPersist?: { kind: "demo"; path: string } | { kind: "idb"; name: string; mime: string } | null;
+ * }} [options]
  */
 async function loadVideoLayer(id, file, options = {}) {
-  const { devAutoloadBatch = false } = options;
+  const { devAutoloadBatch = false, clipPersist: clipPersistOption } = options;
   const layer = state.layers[id - 1];
   if (layer.objectUrl) {
     URL.revokeObjectURL(layer.objectUrl);
@@ -2066,6 +2179,8 @@ async function loadVideoLayer(id, file, options = {}) {
       layer.video.remove();
     }
     layer.video = document.createElement("video");
+    layer.clipPersist = null;
+    scheduleAutosave();
   };
 
   try {
@@ -2139,6 +2254,16 @@ async function loadVideoLayer(id, file, options = {}) {
       console.warn(e);
     }
   }
+  if (clipPersistOption === undefined) {
+    layer.clipPersist = {
+      kind: "idb",
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+    };
+  } else {
+    layer.clipPersist = clipPersistOption;
+  }
+  scheduleAutosave();
 }
 
 function getResolutionKeyForExport() {
@@ -2212,6 +2337,353 @@ function serializeProjectState() {
   };
 }
 
+const VALID_AUTOSAVE_OUTPUT_TIERS = new Set([
+  "720p",
+  "1080p",
+  "2160p",
+  "720x1720",
+  "1440x3440",
+]);
+const VALID_AUTOSAVE_OUTPUT_ASPECTS = new Set(["16:9", "9:16", "21:9", "9:21", "1:1"]);
+
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function coerceRestoredBeatsPerBar(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return 4;
+  }
+  const i = Math.floor(n);
+  if (i < 2) {
+    return 2;
+  }
+  if (i > 12) {
+    return 12;
+  }
+  return i;
+}
+
+function buildAutosaveSnapshot() {
+  const bpm = Number(elements.manualBpm.value) || DEFAULT_BPM;
+  return {
+    kind: "pulsehz-autosave",
+    schemaVersion: 2,
+    savedAt: new Date().toISOString(),
+    hadMediaAtLastSave:
+      state.layers.some((layer) => layer.file) || Boolean(state.audio.file),
+    projectName: elements.projectName.value || "PulseHZ Project",
+    output: {
+      tier: state.output.tier,
+      aspect: state.output.aspect,
+      backdrop: state.output.backdrop,
+    },
+    transport: {
+      bpm,
+      beatsPerBar: state.playback.beatsPerBar,
+    },
+    layers: state.layers.map((layer) => ({
+      id: layer.id,
+      blendMode: layer.blendMode,
+      opacity: typeof layer.opacity === "number" ? layer.opacity : 1,
+      hasVideo: Boolean(layer.file),
+      sourceName: layer.file ? layer.file.name : null,
+      barsPerLoop: normalizeBarsPerLoop(layer.barsPerLoop),
+      barsPerLoopLocked: Boolean(layer.barsPerLoopLocked),
+      canvasFit: layer.canvasFit === "fill" ? "fill" : "fit",
+      clipPersist: layer.file ? layer.clipPersist : null,
+    })),
+    audioSourceName: state.audio.file ? state.audio.file.name : null,
+    audioPersist: state.audio.file ? state.audio.persist : null,
+    controls: structuredClone(state.controls),
+    autoDemo: { grid: state.autoDemo.grid },
+    ui: {
+      metroVisual: Boolean(elements.metroVisualToggle?.checked),
+      metroClick: Boolean(elements.metroClickToggle?.checked),
+    },
+  };
+}
+
+async function flushAutosaveToDisk() {
+  if (suppressAutosave) {
+    return;
+  }
+  try {
+    const snap = buildAutosaveSnapshot();
+    localStorage.setItem(AUTOSAVE_LS_KEY, JSON.stringify(snap));
+    await persistClipBlobsToIdb();
+  } catch (err) {
+    const name = err && typeof err === "object" && "name" in err ? /** @type {{ name?: string }} */ (err).name : "";
+    if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") {
+      console.warn("PulseHZ: autosave skipped (storage full).");
+    } else {
+      console.warn("PulseHZ: autosave failed", err);
+    }
+  }
+}
+
+function scheduleAutosave() {
+  if (suppressAutosave) {
+    return;
+  }
+  if (autosaveTimer !== null) {
+    clearTimeout(autosaveTimer);
+  }
+  autosaveTimer = window.setTimeout(() => {
+    autosaveTimer = null;
+    void flushAutosaveToDisk();
+  }, AUTOSAVE_DEBOUNCE_MS);
+}
+
+/**
+ * @param {unknown} blendMode
+ * @returns {string}
+ */
+function coerceRestoredBlendMode(blendMode) {
+  if (typeof blendMode === "string" && SUPPORTED_BLEND_MODES.includes(blendMode)) {
+    return blendMode;
+  }
+  return "normal";
+}
+
+/**
+ * @param {unknown} transport
+ */
+function applyRestoredPlaybackFromSnapshot(transport) {
+  const rawBpm = transport && typeof transport === "object" ? Number(transport.bpm) : Number.NaN;
+  const bpm = Number.isFinite(rawBpm) && rawBpm > 0 ? rawBpm : DEFAULT_BPM;
+  const rounded = Math.round(bpm * 10) / 10;
+  state.playback.bpm = rounded;
+  elements.manualBpm.value = rounded.toFixed(1);
+  state.playback.beatsPerBar = coerceRestoredBeatsPerBar(
+    transport && typeof transport === "object" ? transport.beatsPerBar : 4,
+  );
+  refreshBarsPerLoopFromTempoForAutoLayers();
+  applyPlaybackRates();
+}
+
+/**
+ * @param {{ layers: Record<string, unknown>[]; audioPersist?: unknown }} snap
+ * @returns {Promise<boolean>} false if any expected IndexedDB blob was missing or a load failed
+ */
+async function restoreClipsFromSnapshot(snap) {
+  const rows = snap.layers;
+  let ok = true;
+  const batch = true;
+  for (let i = 0; i < MAX_LAYERS; i += 1) {
+    const id = i + 1;
+    const row = rows[i];
+    const cp = row && typeof row === "object" ? row.clipPersist : null;
+    if (!cp || typeof cp !== "object") {
+      continue;
+    }
+    if (cp.kind === "demo" && typeof cp.path === "string") {
+      try {
+        const { url, filename } = resolveAutoloadWebmPath(cp.path.trim());
+        await loadClipFromResolvedUrl(url, filename, id, batch, cp.path.trim());
+      } catch (e) {
+        ok = false;
+        console.warn(`PulseHZ: could not restore demo clip L${id}`, e);
+      }
+    } else if (cp.kind === "idb") {
+      const blob = await idbGetClipBlob(`layer-${id}`);
+      if (!blob) {
+        ok = false;
+        continue;
+      }
+      const name = typeof cp.name === "string" && cp.name ? cp.name : `layer-${id}.bin`;
+      const mime = typeof cp.mime === "string" ? cp.mime : "application/octet-stream";
+      const file = new File([blob], name, { type: mime });
+      try {
+        await loadVideoLayer(id, file, {
+          devAutoloadBatch: batch,
+          clipPersist: { kind: "idb", name, mime },
+        });
+      } catch (e) {
+        ok = false;
+        console.warn(`PulseHZ: could not restore cached clip L${id}`, e);
+      }
+    }
+  }
+  const ap = snap.audioPersist;
+  if (ap && typeof ap === "object" && ap.kind === "idb") {
+    const blob = await idbGetClipBlob("audio");
+    if (!blob) {
+      ok = false;
+    } else {
+      const name = typeof ap.name === "string" && ap.name ? ap.name : "audio";
+      const mime = typeof ap.mime === "string" ? ap.mime : "application/octet-stream";
+      const file = new File([blob], name, { type: mime });
+      try {
+        await loadAudio(file);
+      } catch (e) {
+        ok = false;
+        console.warn("PulseHZ: could not restore cached audio", e);
+      }
+    }
+  }
+  return ok;
+}
+
+/**
+ * Reapply saved settings from localStorage; v2 also reloads clips from IndexedDB or same-origin demo paths.
+ * @returns {Promise<boolean>}
+ */
+async function tryRestoreAutosaveAsync() {
+  let raw = null;
+  try {
+    raw = localStorage.getItem(AUTOSAVE_LS_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) {
+    return false;
+  }
+
+  /** @type {unknown} */
+  let snap;
+  try {
+    snap = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!snap || typeof snap !== "object" || /** @type {{ kind?: string }} */ (snap).kind !== "pulsehz-autosave") {
+    return false;
+  }
+  const verRaw = /** @type {{ schemaVersion?: unknown }} */ (snap).schemaVersion;
+  const ver = typeof verRaw === "number" && Number.isFinite(verRaw) ? verRaw : 1;
+  if (ver !== 1 && ver !== 2) {
+    return false;
+  }
+  if (!Array.isArray(/** @type {{ layers?: unknown }} */ (snap).layers)) {
+    return false;
+  }
+  if (/** @type {{ layers: unknown[] }} */ (snap).layers.length !== MAX_LAYERS) {
+    return false;
+  }
+
+  suppressAutosave = true;
+  try {
+    skipNextDefaultDevAutoload = Boolean(/** @type {{ hadMediaAtLastSave?: boolean }} */ (snap).hadMediaAtLastSave);
+
+    if (elements.projectName && typeof /** @type {{ projectName?: unknown }} */ (snap).projectName === "string") {
+      elements.projectName.value = /** @type {{ projectName: string }} */ (snap).projectName;
+    }
+
+    const out = /** @type {{ output?: Record<string, unknown> }} */ (snap).output;
+    if (out && typeof out === "object") {
+      const tier = out.tier;
+      if (typeof tier === "string" && VALID_AUTOSAVE_OUTPUT_TIERS.has(tier)) {
+        state.output.tier = tier;
+      }
+      const aspect = out.aspect;
+      if (typeof aspect === "string" && VALID_AUTOSAVE_OUTPUT_ASPECTS.has(aspect)) {
+        state.output.aspect = aspect;
+      }
+      if (BACKDROP_OPTIONS.includes(/** @type {BackdropKind} */ (out.backdrop))) {
+        state.output.backdrop = /** @type {BackdropKind} */ (out.backdrop);
+      }
+    }
+    syncOutputControlsFromState();
+    applyOutputCanvasFromState();
+    drawPreview(getTransportSeconds());
+
+    applyRestoredPlaybackFromSnapshot(/** @type {{ transport?: unknown }} */ (snap).transport);
+
+    const ctrl = /** @type {{ controls?: unknown }} */ (snap).controls;
+    if (
+      ctrl &&
+      typeof ctrl === "object" &&
+      typeof /** @type {{ schemaVersion?: unknown }} */ (ctrl).schemaVersion === "number"
+    ) {
+      state.controls = structuredClone(/** @type {typeof state.controls} */ (ctrl));
+    } else {
+      state.controls = createEmptyControlsPayload();
+    }
+
+    const ad = /** @type {{ autoDemo?: { grid?: string } }} */ (snap).autoDemo;
+    if (ad && typeof ad === "object" && typeof ad.grid === "string") {
+      const g = ad.grid;
+      state.autoDemo.grid = ["off", "beat", "bar", "both"].includes(g) ? /** @type {typeof state.autoDemo.grid} */ (g) : "off";
+    }
+    if (elements.autoDemoGridSelect) {
+      elements.autoDemoGridSelect.value = state.autoDemo.grid;
+    }
+    state.autoDemo._lastBar = null;
+    state.autoDemo._lastBeat = null;
+
+    const ui = /** @type {{ ui?: { metroVisual?: unknown; metroClick?: unknown } }} */ (snap).ui;
+    if (ui && typeof ui === "object") {
+      if (elements.metroVisualToggle) {
+        elements.metroVisualToggle.checked = Boolean(ui.metroVisual);
+      }
+      if (elements.metroClickToggle) {
+        elements.metroClickToggle.checked = Boolean(ui.metroClick);
+      }
+    }
+
+    const layerRows = /** @type {{ layers: Record<string, unknown>[] }} */ (snap).layers;
+    let clipsOk = true;
+    if (ver >= 2) {
+      clipsOk = await restoreClipsFromSnapshot(snap);
+    }
+
+    for (let i = 0; i < MAX_LAYERS; i += 1) {
+      const layer = state.layers[i];
+      const row = layerRows[i];
+      if (!row || typeof row !== "object") {
+        continue;
+      }
+      layer.blendMode = coerceRestoredBlendMode(row.blendMode);
+      const op = Number(row.opacity);
+      layer.opacity = Number.isFinite(op) ? Math.min(1, Math.max(0, op)) : 1;
+      layer.barsPerLoop = normalizeBarsPerLoop(row.barsPerLoop);
+      layer.barsPerLoopLocked = Boolean(row.barsPerLoopLocked);
+      layer.canvasFit = row.canvasFit === "fill" ? "fill" : "fit";
+    }
+
+    renderLayers();
+    updateTransportDisplays(getTransportSeconds());
+    updateLayerClipRings(getTransportSeconds());
+    drawPreview(getTransportSeconds());
+
+    const had = Boolean(/** @type {{ hadMediaAtLastSave?: boolean }} */ (snap).hadMediaAtLastSave);
+    if (ver >= 2 && had) {
+      setStatus(
+        clipsOk
+          ? "Restored project, cached media (clips/audio), and layout."
+          : "Restored project and layout; some clips or audio could not be reloaded from cache.",
+      );
+    } else {
+      const names = [];
+      for (let i = 0; i < MAX_LAYERS; i += 1) {
+        const row = layerRows[i];
+        const nm = row && typeof row === "object" ? row.sourceName : null;
+        if (typeof nm === "string" && nm.trim()) {
+          names.push(`L${i + 1}: ${nm}`);
+        }
+      }
+      const audioNm = /** @type {{ audioSourceName?: unknown }} */ (snap).audioSourceName;
+      if (typeof audioNm === "string" && audioNm.trim()) {
+        names.push(`Audio: ${audioNm}`);
+      }
+      const hint =
+        had && names.length > 0
+          ? `Restored settings. Re-add files: ${names.join("; ")}.`
+          : "Restored saved project settings.";
+      setStatus(hint);
+    }
+    return true;
+  } catch (e) {
+    console.warn("PulseHZ: autosave restore failed", e);
+    skipNextDefaultDevAutoload = false;
+    return false;
+  } finally {
+    suppressAutosave = false;
+  }
+}
+
 async function exportHighQuality() {
   const videoFiles = state.layers.filter((layer) => layer.file).map((layer) => layer.file);
   if (!videoFiles.length) {
@@ -2279,39 +2751,91 @@ async function exportWeb() {
     return;
   }
 
+  if (!state.layers.some((layer) => layer.file && layer.ready)) {
+    setStatus("Add at least one loaded video layer before WebM export.", { error: true });
+    return;
+  }
+
   const durationSeconds =
     state.audio.file && !state.liveInput.active
       ? Math.max(0.1, elements.audioElement.duration || barDurationSeconds(state.playback.bpm))
       : barDurationSeconds(state.playback.bpm);
 
+  // If we only call resetTransport() while already playing, startPlayback() returns immediately
+  // (isPlaying guard) and transport/clock state never re-initializes — capture breaks or looks like a no-op.
+  pausePlayback();
   resetTransport();
   await startPlayback();
 
   const stream = await createExportStream();
-  const recorder = new MediaRecorder(stream, {
-    mimeType: codec,
-    videoBitsPerSecond: 12_000_000,
-  });
+  /** @type {MediaRecorder | null} */
+  let recorder = null;
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType: codec,
+      videoBitsPerSecond: 12_000_000,
+    });
+  } catch (error) {
+    pausePlayback();
+    resetTransport();
+    throw error;
+  }
+
   const chunks = [];
   recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) {
+    if (event.data && event.data.size > 0) {
       chunks.push(event.data);
     }
   };
 
-  const finished = new Promise((resolve) => {
-    recorder.onstop = resolve;
+  const finished = new Promise((resolve, reject) => {
+    recorder.onerror = () => {
+      reject(recorder.error || new Error("MediaRecorder failed during WebM export."));
+    };
+    recorder.onstop = () => resolve();
   });
 
-  recorder.start();
-  setStatus("Recording browser output to WebM...");
-  await new Promise((resolve) => window.setTimeout(resolve, durationSeconds * 1000));
-  recorder.stop();
-  await finished;
+  try {
+    recorder.start(1000);
+    const src =
+      state.audio.file && !state.liveInput.active
+        ? "full audio length"
+        : "one bar at current BPM (no audio file)";
+    setStatus(
+      `Recording WebM — ${durationSeconds.toFixed(1)}s (${src}). Transport runs; download starts when this finishes.`,
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, durationSeconds * 1000));
+    if (recorder.state === "recording") {
+      recorder.stop();
+    }
+    await finished;
+  } catch (error) {
+    try {
+      if (recorder && recorder.state === "recording") {
+        recorder.stop();
+      }
+    } catch {
+      /* ignore */
+    }
+    pausePlayback();
+    resetTransport();
+    throw error;
+  } finally {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+  }
+
   pausePlayback();
   resetTransport();
 
-  const blob = new Blob(chunks, { type: codec });
+  if (!chunks.length) {
+    setStatus("WebM export produced no video data (try again or use Export ProRes).", { error: true });
+    return;
+  }
+
+  const blobMime = codec.includes(";") ? codec.slice(0, codec.indexOf(";")) : codec;
+  const blob = new Blob(chunks, { type: blobMime || "video/webm" });
   const downloadUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = downloadUrl;
@@ -2320,7 +2844,7 @@ async function exportWeb() {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(downloadUrl);
-  setStatus("Browser capture export finished.");
+  setStatus("WebM export finished — check your browser downloads for the .webm file.");
 }
 
 /** ~16s window; same estimator as decoded files (onset envelopes on hop-sized chunks). */
@@ -2485,6 +3009,7 @@ function clearAudio() {
   state.audio.bpmSegments = null;
   state.audio.bpmSegmentsStatus = "idle";
   state.audio.prescanStatus = "idle";
+  state.audio.persist = null;
   if (elements.audioPrescanHint) {
     elements.audioPrescanHint.classList.add("hidden");
     elements.audioPrescanHint.textContent = "";
@@ -2495,6 +3020,7 @@ function clearAudio() {
   elements.audioElement.classList.add("hidden");
   state.playback.usingAudioClock = false;
   connectFileSources();
+  scheduleAutosave();
   setStatus("Audio track cleared.");
 }
 
@@ -2535,7 +3061,13 @@ async function loadAudio(file) {
       elements.audioPrescanHint.classList.add("hidden");
     }
   }
+  state.audio.persist = {
+    kind: "idb",
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+  };
   setStatus(`Loaded audio track ${file.name}.`);
+  scheduleAutosave();
 }
 
 function handleManualBpmChange() {
@@ -2598,6 +3130,7 @@ function handleOutputSettingsChange() {
   state.output.backdrop = backdrop;
   applyOutputCanvasFromState();
   drawPreview(getTransportSeconds());
+  scheduleAutosave();
 }
 
 const DEMO_LFO_ROUTE_ID = "pulsehz-demo-lfo-opacity";
@@ -2626,6 +3159,7 @@ function toggleDemoLfoOpacity() {
     setStatus("Demo LFO on layer 1 opacity (one sine cycle per beat). Toggle again to remove.");
   }
   drawPreview(getTransportSeconds());
+  scheduleAutosave();
 }
 
 let clipStripKeyboardInstalled = false;
@@ -2675,6 +3209,7 @@ function installClipStripKeyboard() {
       layer.canvasFit = layer.canvasFit === "fill" ? "fit" : "fill";
       renderLayers();
       drawPreview(getTransportSeconds());
+      scheduleAutosave();
       document.querySelector(`.layer-card[data-layer-id="${String(id)}"]`)?.focus();
       ev.preventDefault();
       return;
@@ -2718,6 +3253,7 @@ function wireEvents() {
   elements.outputTierSelect?.addEventListener("change", handleOutputSettingsChange);
   elements.outputAspectSelect?.addEventListener("change", handleOutputSettingsChange);
   elements.outputBackdropSelect?.addEventListener("change", handleOutputSettingsChange);
+  elements.projectName?.addEventListener("input", scheduleAutosave);
   elements.playButton.addEventListener("click", () => {
     startPlayback().catch((error) => setStatus(error.message, { error: true }));
   });
@@ -2753,6 +3289,7 @@ function wireEvents() {
   elements.exportWebButton.addEventListener("click", handleWebExportClick);
   elements.demoLfoOpacityButton?.addEventListener("click", toggleDemoLfoOpacity);
   elements.autoDemoGridSelect?.addEventListener("change", handleAutoDemoGridChange);
+  elements.metroVisualToggle?.addEventListener("change", scheduleAutosave);
   elements.metroClickToggle?.addEventListener("change", async () => {
     try {
       await resumeAudioContext();
@@ -2762,6 +3299,7 @@ function wireEvents() {
     } catch {
       /* ignore */
     }
+    scheduleAutosave();
   });
   installClipStripKeyboard();
 }
@@ -2917,8 +3455,11 @@ function isPulseHzLoopbackDevHost() {
 /** How many layers to fill from `manifest.json` on loopback when `autoload` is omitted. */
 const DEV_STARTUP_DEMO_LAYERS = 3;
 
-/** Fetch one demo clip blob and assign it to a layer (dev autoload / startup). */
-async function loadClipFromResolvedUrl(url, filename, layerId, batch = false) {
+/**
+ * Fetch one demo clip blob and assign it to a layer (dev autoload / startup).
+ * @param {string} [demoRelPath] allowlisted relative path (e.g. `demo-clips/foo.webm`) for autosave restore
+ */
+async function loadClipFromResolvedUrl(url, filename, layerId, batch = false, demoRelPath = "") {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`${res.status} ${url}`);
@@ -2927,7 +3468,13 @@ async function loadClipFromResolvedUrl(url, filename, layerId, batch = false) {
   const file = new File([blob], filename, {
     type: blob.type || "video/webm",
   });
-  await loadVideoLayer(layerId, file, { devAutoloadBatch: batch });
+  const trimmed = typeof demoRelPath === "string" ? demoRelPath.trim() : "";
+  /** @type {{ devAutoloadBatch: boolean; clipPersist?: { kind: "demo"; path: string } }} */
+  const opts = { devAutoloadBatch: batch };
+  if (trimmed) {
+    opts.clipPersist = { kind: "demo", path: trimmed };
+  }
+  await loadVideoLayer(layerId, file, opts);
 }
 
 /**
@@ -2962,13 +3509,14 @@ async function maybeDevAutoload() {
       if (trimmed.endsWith(".webm")) {
         const path = trimmed.replace(/^\//, "");
         const { url, filename } = resolveAutoloadWebmPath(path);
-        await loadClipFromResolvedUrl(url, filename, 1, false);
+        await loadClipFromResolvedUrl(url, filename, 1, false, path);
         return;
       }
 
       if (kw === "fixture") {
-        const { url, filename } = resolveAutoloadWebmPath("fixture-debug.webm");
-        await loadClipFromResolvedUrl(url, filename, 1, false);
+        const rel = "fixture-debug.webm";
+        const { url, filename } = resolveAutoloadWebmPath(rel);
+        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
         return;
       }
 
@@ -2976,23 +3524,26 @@ async function maybeDevAutoload() {
 
       if (kw === "1" || kw === "first") {
         assertSafeDemoWebmFilename(clips[0]);
-        const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${clips[0]}`);
-        await loadClipFromResolvedUrl(url, filename, 1, false);
+        const rel = `demo-clips/${clips[0]}`;
+        const { url, filename } = resolveAutoloadWebmPath(rel);
+        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
         return;
       }
       if (kw === "random") {
         const pick = clips[Math.floor(Math.random() * clips.length)];
         assertSafeDemoWebmFilename(pick);
-        const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${pick}`);
-        await loadClipFromResolvedUrl(url, filename, 1, false);
+        const rel = `demo-clips/${pick}`;
+        const { url, filename } = resolveAutoloadWebmPath(rel);
+        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
         return;
       }
       if (kw === "all") {
         const n = Math.min(4, clips.length);
         for (let i = 0; i < n; i++) {
           assertSafeDemoWebmFilename(clips[i]);
-          const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${clips[i]}`);
-          await loadClipFromResolvedUrl(url, filename, i + 1, true);
+          const rel = `demo-clips/${clips[i]}`;
+          const { url, filename } = resolveAutoloadWebmPath(rel);
+          await loadClipFromResolvedUrl(url, filename, i + 1, true, rel);
         }
         setStatus(`Dev autoload: loaded ${n} demo clips into layers 1–${n}.`);
         return;
@@ -3013,13 +3564,19 @@ async function maybeDevAutoload() {
     return;
   }
 
+  if (skipNextDefaultDevAutoload) {
+    skipNextDefaultDevAutoload = false;
+    return;
+  }
+
   try {
     const clips = await fetchDemoClipsManifestEntries();
     const n = Math.min(DEV_STARTUP_DEMO_LAYERS, clips.length);
     for (let i = 0; i < n; i++) {
       assertSafeDemoWebmFilename(clips[i]);
-      const { url, filename } = resolveAutoloadWebmPath(`demo-clips/${clips[i]}`);
-      await loadClipFromResolvedUrl(url, filename, i + 1, true);
+      const rel = `demo-clips/${clips[i]}`;
+      const { url, filename } = resolveAutoloadWebmPath(rel);
+      await loadClipFromResolvedUrl(url, filename, i + 1, true, rel);
     }
     setStatus(
       n === 1
@@ -3042,4 +3599,7 @@ window.pulsehzApp = {
 };
 
 initialize();
-void maybeDevAutoload();
+void (async () => {
+  await tryRestoreAutosaveAsync();
+  await maybeDevAutoload();
+})();
