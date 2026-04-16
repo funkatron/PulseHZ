@@ -11,7 +11,7 @@ from pulsehz.project_controls import (
     ProjectControls,
     default_project_controls,
 )
-from pulsehz.server import ProjectMetadata
+from pulsehz.api_models import LayerMetadata, ProjectMetadata
 
 
 def test_default_controls_round_trip():
@@ -47,8 +47,6 @@ def test_modulation_route_example():
 
 
 def test_layer_metadata_opacity_bounds():
-    from pulsehz.server import LayerMetadata
-
     with pytest.raises(ValidationError):
         LayerMetadata(id=1, blendMode="normal", hasVideo=True, opacity=1.5)
     layer = LayerMetadata(id=1, blendMode="normal", hasVideo=True, opacity=0.4)

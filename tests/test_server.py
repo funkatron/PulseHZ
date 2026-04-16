@@ -174,12 +174,12 @@ def test_export_command_includes_lavfi_for_black_backdrop(monkeypatch, tmp_path)
     )
     captured: list[list[str]] = []
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, *, capture_output=True, text=True, timeout=300):
         captured.append(cmd)
         Path(cmd[-1]).write_bytes(b"x")
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr("pulsehz.server.subprocess.run", fake_run)
+    monkeypatch.setattr("pulsehz.ffmpeg_cli.run_ffmpeg", fake_run)
     response = client.post(
         "/api/export-video",
         files=[
@@ -248,12 +248,12 @@ def test_export_video_returns_rendered_file(monkeypatch, tmp_path):
         },
     )
 
-    def fake_run(command, capture_output, text, timeout):
+    def fake_run(command, *, capture_output=True, text=True, timeout=300):
         output_path = Path(command[-1])
         output_path.write_bytes(b"movdata")
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr("pulsehz.server.subprocess.run", fake_run)
+    monkeypatch.setattr("pulsehz.ffmpeg_cli.run_ffmpeg", fake_run)
 
     response = client.post(
         "/api/export-video",
@@ -271,12 +271,12 @@ def test_export_video_returns_rendered_file(monkeypatch, tmp_path):
 
 
 def test_preview_video_returns_transcoded_mp4(monkeypatch):
-    def fake_run(command, capture_output, text, timeout):
+    def fake_run(command, *, capture_output=True, text=True, timeout=300):
         output_path = Path(command[-1])
         output_path.write_bytes(b"h264preview")
         return SimpleNamespace(returncode=0, stderr="")
 
-    monkeypatch.setattr("pulsehz.server.subprocess.run", fake_run)
+    monkeypatch.setattr("pulsehz.ffmpeg_cli.run_ffmpeg", fake_run)
 
     response = client.post(
         "/api/preview-video",

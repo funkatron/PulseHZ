@@ -10,6 +10,11 @@ import {
   bpmAtTime,
   medianBpmFromSegments,
 } from "./bpm-analysis.js?v=20260415";
+import { getOutputDimensions, OUTPUT_FIXED_PRESETS } from "./output-dimensions.js";
+import {
+  idbGetClipBlob,
+  persistClipBlobsToIdb,
+} from "./clip-cache-idb.js";
 
 const MAX_LAYERS = 4;
 
@@ -38,90 +43,6 @@ let autosaveTimer = null;
 let suppressAutosave = false;
 /** Skip loopback demo startup once if last autosave had media attached (avoid clobbering empty slots). */
 let skipNextDefaultDevAutoload = false;
-
-const CLIP_IDB_NAME = "pulsehz-clip-cache-v1";
-const CLIP_IDB_VER = 1;
-
-/**
- * @returns {Promise<IDBDatabase>}
- */
-function openPulsehzClipIdb() {
-  return new Promise((resolve, reject) => {
-    if (!window.indexedDB) {
-      reject(new Error("IndexedDB unavailable"));
-      return;
-    }
-    const req = indexedDB.open(CLIP_IDB_NAME, CLIP_IDB_VER);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains("blobs")) {
-        db.createObjectStore("blobs");
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
-  });
-}
-
-/**
- * @param {string} key
- * @returns {Promise<Blob | File | null>}
- */
-async function idbGetClipBlob(key) {
-  if (!window.indexedDB) {
-    return null;
-  }
-  try {
-    const db = await openPulsehzClipIdb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("blobs", "readonly");
-      const r = tx.objectStore("blobs").get(key);
-      r.onsuccess = () => {
-        db.close();
-        resolve(r.result ?? null);
-      };
-      r.onerror = () => reject(r.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function persistClipBlobsToIdb() {
-  if (!window.indexedDB) {
-    return;
-  }
-  try {
-    const db = await openPulsehzClipIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction("blobs", "readwrite");
-      const store = tx.objectStore("blobs");
-      for (let i = 0; i < MAX_LAYERS; i += 1) {
-        const id = i + 1;
-        const layer = state.layers[i];
-        const key = `layer-${id}`;
-        if (!layer.file || layer.clipPersist?.kind === "demo") {
-          store.delete(key);
-        } else {
-          store.put(layer.file, key);
-        }
-      }
-      if (state.audio.file) {
-        store.put(state.audio.file, "audio");
-      } else {
-        store.delete("audio");
-      }
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
-    });
-  } catch (e) {
-    console.warn("PulseHZ: IndexedDB clip save failed", e);
-  }
-}
 
 function cancelCompositorBpmDebounce() {
   if (compositorBpmDebounceTimer !== null) {
@@ -178,73 +99,6 @@ const PLAYBACK_RATE_FALLBACK_STEPS = [
 
 /** @typedef {"black" | "white" | "transparent"} BackdropKind */
 const BACKDROP_OPTIONS = /** @type {const} */ (["black", "white", "transparent"]);
-
-/** Vertical resolution for 720p / 1080p / 2160p tiers (16∶9 height). */
-const OUTPUT_TIER_HEIGHT = {
-  "720p": 720,
-  "1080p": 1080,
-  "2160p": 2160,
-};
-
-const OUTPUT_FIXED_PRESETS = {
-  "720x1720": { width: 720, height: 1720 },
-  "1440x3440": { width: 1440, height: 3440 },
-};
-
-/**
- * Pixel size for the main canvas and ProRes export metadata.
- * Layers are letterboxed into this frame by default (aspect ratio preserved; no crop).
- */
-function getOutputDimensions(tierId, aspectId) {
-  const fixed = OUTPUT_FIXED_PRESETS[tierId];
-  if (fixed) {
-    return { ...fixed };
-  }
-
-  const h0 = OUTPUT_TIER_HEIGHT[tierId];
-  if (!h0) {
-    return { width: 1920, height: 1080 };
-  }
-
-  if (aspectId === "16:9") {
-    if (tierId === "720p") {
-      return { width: 1280, height: 720 };
-    }
-    if (tierId === "1080p") {
-      return { width: 1920, height: 1080 };
-    }
-    return { width: 3840, height: 2160 };
-  }
-
-  if (aspectId === "9:16") {
-    if (tierId === "720p") {
-      return { width: 720, height: 1280 };
-    }
-    if (tierId === "1080p") {
-      return { width: 1080, height: 1920 };
-    }
-    return { width: 2160, height: 3840 };
-  }
-
-  if (aspectId === "21:9") {
-    const height = h0;
-    const width = Math.round((height * 21) / 9);
-    return { width, height };
-  }
-
-  if (aspectId === "9:21") {
-    const width = h0;
-    const height = Math.round((width * 21) / 9);
-    return { width, height };
-  }
-
-  if (aspectId === "1:1") {
-    const side = h0;
-    return { width: side, height: side };
-  }
-
-  return { width: 1920, height: 1080 };
-}
 
 const SUPPORTED_BLEND_MODES = [
   "normal",
@@ -2412,7 +2266,7 @@ async function flushAutosaveToDisk() {
   try {
     const snap = buildAutosaveSnapshot();
     localStorage.setItem(AUTOSAVE_LS_KEY, JSON.stringify(snap));
-    await persistClipBlobsToIdb();
+    await persistClipBlobsToIdb(state, MAX_LAYERS);
   } catch (err) {
     const name = err && typeof err === "object" && "name" in err ? /** @type {{ name?: string }} */ (err).name : "";
     if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") {
