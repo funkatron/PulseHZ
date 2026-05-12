@@ -21,6 +21,9 @@ import {
   drawPreviewFrame,
   syncPreviewBackdropChrome as wirePreviewBackdropChromeToDom,
 } from "./preview-compositor.js";
+import { createTransportUi } from "./transport-ui.js?v=20260415";
+import { createLayerUi } from "./layer-ui.js?v=20260415";
+import { maybeDevAutoload, resolveAutoloadWebmPath } from "./dev-autoload.js?v=20260415";
 
 const MAX_LAYERS = 4;
 
@@ -49,6 +52,14 @@ let autosaveTimer = null;
 let suppressAutosave = false;
 /** Skip loopback demo startup once if last autosave had media attached (avoid clobbering empty slots). */
 let skipNextDefaultDevAutoload = false;
+
+function tryConsumeDefaultDevAutoloadSkip() {
+  if (!skipNextDefaultDevAutoload) {
+    return false;
+  }
+  skipNextDefaultDevAutoload = false;
+  return true;
+}
 
 function cancelCompositorBpmDebounce() {
   if (compositorBpmDebounceTimer !== null) {
@@ -335,7 +346,7 @@ function commitTransportBpm(nextBpm, source) {
   elements.manualBpm.value = nextBpm.toFixed(1);
   refreshBarsPerLoopFromTempoForAutoLayers();
   applyPlaybackRates();
-  updateTransportDisplays(getTransportSeconds());
+  transportUi.updateTransportDisplays(getTransportSeconds());
   if (state.playback.isPlaying) {
     syncLayerVideos(getTransportSeconds());
   }
@@ -427,202 +438,6 @@ function updateFileBpmFromSegments() {
   fileBpmFollowLastApplyMs = now;
   state.playback.detectedBpm = rounded;
   requestDebouncedCompositorBpm(rounded, "file-segments");
-}
-
-/** @param {number} cx @param {number} cy @param {number} r @param {number} angleDeg angle from +x axis (12 o'clock = -90). */
-function polarFromAngleDegrees(cx, cy, r, angleDeg) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-}
-
-/** @type {string} */
-let transportBeatTicksSignature = "";
-let lastMetronomeBarIndex = -1;
-/** @type {number | null} */
-let lastAnnouncedTransportBeat = null;
-/** @type {AudioContext | null} */
-let metronomeClickContext = null;
-
-function playMetronomeClick() {
-  if (!elements.metroClickToggle?.checked) {
-    return;
-  }
-  try {
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) {
-      return;
-    }
-    if (!metronomeClickContext) {
-      metronomeClickContext = new Ctor();
-    }
-    const ctx = metronomeClickContext;
-    if (ctx.state === "suspended") {
-      void ctx.resume();
-    }
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = "square";
-    o.frequency.value = 1180;
-    const t0 = ctx.currentTime;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.003);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.055);
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.start(t0);
-    o.stop(t0 + 0.06);
-  } catch {
-    /* ignore */
-  }
-}
-
-function tickMetronomeUi(transportSeconds) {
-  const bpm = state.playback.bpm || DEFAULT_BPM;
-  const beats = state.playback.beatsPerBar || 4;
-  const barSec = barDurationSeconds(bpm, beats);
-  if (barSec <= 0) {
-    return;
-  }
-  const barIdx = Math.floor(transportSeconds / barSec);
-  if (!state.playback.isPlaying) {
-    lastMetronomeBarIndex = barIdx;
-    return;
-  }
-  if (barIdx === lastMetronomeBarIndex) {
-    return;
-  }
-  lastMetronomeBarIndex = barIdx;
-  if (elements.metroVisualToggle?.checked) {
-    const wrap = elements.previewCanvasWrap;
-    if (wrap) {
-      wrap.classList.remove("preview-metronome-flash");
-      void wrap.offsetWidth;
-      wrap.classList.add("preview-metronome-flash");
-      window.setTimeout(() => wrap.classList.remove("preview-metronome-flash"), 340);
-    }
-  }
-  playMetronomeClick();
-}
-
-function updateTransportBeatRing(transportSeconds) {
-  const ticksEl = elements.transportBeatRingTicks;
-  const progEl = elements.transportBeatRingProgress;
-  if (!(ticksEl instanceof SVGGElement) || !(progEl instanceof SVGCircleElement)) {
-    return;
-  }
-  const bpm = state.playback.bpm || DEFAULT_BPM;
-  const beats = state.playback.beatsPerBar || 4;
-  const sig = `${beats}`;
-  if (sig !== transportBeatTicksSignature) {
-    transportBeatTicksSignature = sig;
-    ticksEl.replaceChildren();
-    for (let i = 0; i < beats; i += 1) {
-      const ang = -90 + (i * 360) / beats;
-      const outer = polarFromAngleDegrees(50, 50, 40, ang);
-      const inner = polarFromAngleDegrees(50, 50, 30, ang);
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", String(inner.x));
-      line.setAttribute("y1", String(inner.y));
-      line.setAttribute("x2", String(outer.x));
-      line.setAttribute("y2", String(outer.y));
-      line.setAttribute("class", "transport-beat-ring__tick");
-      ticksEl.appendChild(line);
-    }
-  }
-  const barSec = barDurationSeconds(bpm, beats);
-  const phase = barSec > 0 ? transportSeconds % barSec : 0;
-  const beatIdx =
-    barSec > 0 ? Math.min(beats - 1, Math.floor(phase / (barSec / beats))) : 0;
-  const lines = ticksEl.querySelectorAll("line");
-  lines.forEach((ln, i) => {
-    ln.setAttribute(
-      "class",
-      i === beatIdx ? "transport-beat-ring__tick transport-beat-ring__tick--active" : "transport-beat-ring__tick",
-    );
-  });
-  const frac = barSec > 0 ? phase / barSec : 0;
-  progEl.setAttribute("stroke-dashoffset", String(100 - frac * 100));
-}
-
-function createLayerClipRingSvg(layer) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "layer-clip-ring");
-  svg.setAttribute("viewBox", "0 0 100 100");
-  svg.setAttribute("data-clip-ring-for", String(layer.id));
-  const n = Math.max(1, normalizeBarsPerLoop(layer.barsPerLoop));
-  const track = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  track.setAttribute("class", "layer-clip-ring__track");
-  track.setAttribute("cx", "50");
-  track.setAttribute("cy", "50");
-  track.setAttribute("r", "44");
-  track.setAttribute("pathLength", "100");
-  svg.appendChild(track);
-  for (let i = 0; i < n; i += 1) {
-    const ang = -90 + (i * 360) / n;
-    const outer = polarFromAngleDegrees(50, 50, 47, ang);
-    const inner = polarFromAngleDegrees(50, 50, 36, ang);
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", String(inner.x));
-    line.setAttribute("y1", String(inner.y));
-    line.setAttribute("x2", String(outer.x));
-    line.setAttribute("y2", String(outer.y));
-    line.setAttribute("class", "layer-clip-ring__tick");
-    line.dataset.barTick = String(i);
-    svg.appendChild(line);
-  }
-  const prog = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  prog.setAttribute("class", "layer-clip-ring__progress");
-  prog.setAttribute("cx", "50");
-  prog.setAttribute("cy", "50");
-  prog.setAttribute("r", "44");
-  prog.setAttribute("pathLength", "100");
-  prog.setAttribute("stroke-dasharray", "100");
-  prog.setAttribute("stroke-dashoffset", "100");
-  svg.appendChild(prog);
-  return svg;
-}
-
-function updateLayerClipRings(transportSeconds) {
-  const playing = state.playback.isPlaying;
-  const bpm = state.playback.bpm || DEFAULT_BPM;
-  const barSec = barDurationSeconds(bpm, state.playback.beatsPerBar);
-  for (const layer of state.layers) {
-    const card = document.querySelector(`.layer-card[data-layer-id="${layer.id}"]`);
-    if (!(card instanceof HTMLElement)) {
-      continue;
-    }
-    card.classList.toggle("is-clip-playing", playing && Boolean(layer.file && layer.ready));
-    const svg = card.querySelector("svg.layer-clip-ring");
-    if (!(svg instanceof SVGSVGElement)) {
-      continue;
-    }
-    if (!layer.file) {
-      svg.classList.remove("layer-clip-ring--loading");
-      svg.dataset.clipUi = "empty";
-      continue;
-    }
-    if (layer.loading || !layer.ready) {
-      svg.classList.add("layer-clip-ring--loading");
-      svg.dataset.clipUi = "loading";
-      continue;
-    }
-    svg.classList.remove("layer-clip-ring--loading");
-    const n = normalizeBarsPerLoop(layer.barsPerLoop);
-    const loopSec = barSec * n;
-    const p = loopSec > 0 ? (transportSeconds % loopSec) / loopSec : 0;
-    const prog = svg.querySelector(".layer-clip-ring__progress");
-    if (prog instanceof SVGCircleElement) {
-      prog.setAttribute("stroke-dashoffset", String(100 - p * 100));
-    }
-    const barInLoop = Math.min(n - 1, Math.floor(p * n + 1e-9));
-    svg.querySelectorAll(".layer-clip-ring__tick").forEach((el, i) => {
-      el.setAttribute(
-        "class",
-        i <= barInLoop ? "layer-clip-ring__tick layer-clip-ring__tick--on" : "layer-clip-ring__tick",
-      );
-    });
-    svg.dataset.clipUi = playing ? "playing" : "idle";
-  }
 }
 
 /** Onset + beat-interval BPM estimator (~60fps) while live capture is active. */
@@ -892,88 +707,13 @@ function truncateMiddleEllipsis(name, max) {
   return `${name.slice(0, max - 1)}…`;
 }
 
-function updateSidebarSheetKickers() {
-  const patchEl = document.getElementById("sidebar-kicker-patch");
-  const exportEl = document.getElementById("sidebar-kicker-export");
-  const statusEl = document.getElementById("sidebar-kicker-status");
-  const bpm = (state.playback.bpm || DEFAULT_BPM).toFixed(1);
-
-  if (patchEl) {
-    if (state.liveInput.active) {
-      patchEl.textContent = ` · live · ${bpm} BPM`;
-    } else if (state.audio.file?.name) {
-      patchEl.textContent = ` · ${truncateMiddleEllipsis(state.audio.file.name, 20)} · ${bpm} BPM`;
-    } else {
-      patchEl.textContent = ` · no audio file · ${bpm} BPM`;
-    }
-  }
-
-  if (exportEl) {
-    const { width, height } = getOutputDimensions(state.output.tier, state.output.aspect);
-    exportEl.textContent = ` · ${state.output.tier} · ${width}×${height}`;
-  }
-
-  if (statusEl) {
-    const n = state.layers.filter((l) => l.file).length;
-    statusEl.textContent = ` · ${n} clip${n === 1 ? "" : "s"}`;
-  }
-}
-
-function updateTransportDisplays(transportSeconds = 0) {
-  const barSeconds = barDurationSeconds(state.playback.bpm, state.playback.beatsPerBar);
-  const phase = barSeconds > 0 ? transportSeconds % barSeconds : 0;
-  const currentBeat = (phase / (barSeconds / state.playback.beatsPerBar)) + 1;
-
-  elements.currentBeat.textContent = currentBeat.toFixed(2);
-  elements.barDuration.textContent = `${barSeconds.toFixed(2)}s`;
-  elements.transportProgressBar.style.width = `${(phase / barSeconds) * 100}%`;
-  elements.detectedBpm.textContent = state.playback.detectedBpm
-    ? state.playback.detectedBpm.toFixed(1)
-    : "--";
-  elements.loadedLayers.textContent = `${state.layers.filter((layer) => layer.file).length} / ${MAX_LAYERS}`;
-  elements.previewTransportLabel.textContent = state.playback.isPlaying ? "Playing" : "Stopped";
-
-  if (elements.previewDetectedBpm) {
-    elements.previewDetectedBpm.textContent = state.playback.detectedBpm
-      ? `BPM ${state.playback.detectedBpm.toFixed(1)}`
-      : "BPM --";
-  }
-  if (elements.previewBarDuration) {
-    elements.previewBarDuration.textContent = `Bar ${barSeconds.toFixed(2)}s`;
-  }
-  if (elements.previewBpmMapStatus) {
-    const st = state.audio.bpmSegmentsStatus;
-    elements.previewBpmMapStatus.textContent =
-      st === "building"
-        ? "Tempo map: building…"
-        : st === "ready"
-          ? "Tempo map: ready"
-          : st === "error"
-            ? "Tempo map: error"
-            : "";
-  }
-
-  const beatDur =
-    barSeconds > 0 ? barSeconds / (state.playback.beatsPerBar || 4) : 0;
-  const globalBeat = beatDur > 0 ? Math.floor(transportSeconds / beatDur + 1e-9) : 0;
-  const ann = elements.transportGridAnnounce;
-  if (ann && beatDur > 0) {
-    if (state.playback.isPlaying) {
-      if (lastAnnouncedTransportBeat !== globalBeat) {
-        lastAnnouncedTransportBeat = globalBeat;
-        const beats = state.playback.beatsPerBar || 4;
-        const beatInBar = (globalBeat % beats) + 1;
-        const barNumber = Math.floor(globalBeat / beats) + 1;
-        ann.textContent = `Bar ${barNumber}, beat ${beatInBar}`;
-      }
-    } else {
-      lastAnnouncedTransportBeat = globalBeat;
-    }
-  }
-
-  updateSidebarSheetKickers();
-  updateTransportBeatRing(transportSeconds);
-}
+const transportUi = createTransportUi({
+  getState: () => state,
+  getElements: () => elements,
+  maxLayers: MAX_LAYERS,
+  getOutputDimensions,
+  truncateMiddleEllipsis,
+});
 
 /** All layers with a ready clip (auto-demo steps each row; index uses layer id as offset). */
 function activeLoadedLayers() {
@@ -1473,9 +1213,9 @@ function renderLoop() {
   drawPreview(transportSeconds);
   updateAudioMeter();
   updateFileBpmFromSegments();
-  updateTransportDisplays(transportSeconds);
-  tickMetronomeUi(transportSeconds);
-  updateLayerClipRings(transportSeconds);
+  transportUi.updateTransportDisplays(transportSeconds);
+  transportUi.tickMetronomeUi(transportSeconds);
+  layerUi.updateLayerClipRings(transportSeconds);
   state.animationFrameId = requestAnimationFrame(renderLoop);
 }
 
@@ -1543,8 +1283,8 @@ function pausePlayback() {
   }
 
   elements.audioElement.pause();
-  updateTransportDisplays(state.playback.startOffsetSeconds);
-  updateLayerClipRings(state.playback.startOffsetSeconds);
+  transportUi.updateTransportDisplays(state.playback.startOffsetSeconds);
+  layerUi.updateLayerClipRings(state.playback.startOffsetSeconds);
   if (state.liveInput.active) {
     startIdleLiveMeter();
   }
@@ -1555,7 +1295,7 @@ function pausePlayback() {
 function resetTransport() {
   state.playback.startOffsetSeconds = 0;
   elements.audioElement.currentTime = 0;
-  updateTransportDisplays(0);
+  transportUi.updateTransportDisplays(0);
   syncLayerVideos(0);
   drawPreview(0);
   refreshAllLayerSlotThumbs();
@@ -1581,279 +1321,8 @@ function clearLayer(id) {
   layer.clipPersist = null;
   renderLayers();
   drawPreview(getTransportSeconds());
-  updateTransportDisplays(getTransportSeconds());
+  transportUi.updateTransportDisplays(getTransportSeconds());
   scheduleAutosave();
-}
-
-function renderLayers() {
-  elements.layersGrid.innerHTML = "";
-
-  for (const layer of state.layers) {
-    const card = document.createElement("section");
-    card.className = "panel layer-card";
-    card.setAttribute("data-layer-id", String(layer.id));
-    card.tabIndex = 0;
-
-    const fullName = layer.file ? layer.file.name : "";
-    const shortName =
-      layer.file && layer.file.name.length > 14
-        ? `${layer.file.name.slice(0, 12)}…`
-        : layer.file
-          ? layer.file.name
-          : "Empty";
-
-    const header = document.createElement("div");
-    header.className = "layer-header";
-    header.innerHTML = `<strong>L${layer.id}</strong><span class="muted"></span>`;
-    const mutedEl = header.querySelector(".muted");
-    if (mutedEl instanceof HTMLElement) {
-      mutedEl.textContent = shortName;
-      mutedEl.title = fullName;
-    }
-
-    const slot = document.createElement("div");
-    slot.className = "layer-slot";
-
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = "video/*";
-    fileInput.className = "hidden";
-    fileInput.id = `layer-file-${layer.id}`;
-    fileInput.addEventListener("change", async (event) => {
-      const input = event.target;
-      const [file] = input.files || [];
-      input.value = "";
-      if (!file) {
-        return;
-      }
-      if (!isProbablyVideoFile(file)) {
-        setStatus(`Not a supported video type: ${file.name}`, { error: true });
-        return;
-      }
-      try {
-        await loadVideoLayer(layer.id, file);
-      } catch {
-        /* loadVideoLayer sets status */
-      }
-    });
-
-    const thumbArea = document.createElement("label");
-    thumbArea.className = "layer-slot-thumb-area";
-    thumbArea.setAttribute("for", fileInput.id);
-
-    const thumbWrap = document.createElement("div");
-    thumbWrap.className = "layer-slot-thumb-wrap";
-
-    thumbArea.appendChild(fileInput);
-    thumbArea.appendChild(thumbWrap);
-    slot.appendChild(thumbArea);
-
-    if (layer.file) {
-      mountLayerVideoInStaging(layer);
-      layer.video.controls = false;
-      layer.video.playsInline = true;
-
-      const ringHost = document.createElement("div");
-      ringHost.className = "layer-slot-thumb-ring-host";
-
-      const thumb = document.createElement("canvas");
-      thumb.className = "layer-slot-thumb";
-      thumb.width = SLOT_THUMB_BITMAP_W;
-      thumb.height = SLOT_THUMB_BITMAP_H;
-      layer.slotThumbCanvas = thumb;
-      const tctx = thumb.getContext("2d");
-      if (tctx) {
-        drawLayerSlotPlaceholder(tctx, SLOT_THUMB_BITMAP_W, SLOT_THUMB_BITMAP_H);
-      }
-      ringHost.appendChild(thumb);
-      ringHost.appendChild(createLayerClipRingSvg(layer));
-      thumbWrap.appendChild(ringHost);
-      queueSlotThumbPaint(layer);
-
-      const meta = document.createElement("div");
-      meta.className = "layer-slot-meta";
-      const bp = normalizeBarsPerLoop(layer.barsPerLoop);
-      meta.textContent = `${layer.duration.toFixed(2)}s · ${bp === 1 ? "1" : bp} bar`;
-      thumbWrap.appendChild(meta);
-    } else {
-      layer.slotThumbCanvas = null;
-      const empty = document.createElement("div");
-      empty.className = "layer-slot-empty";
-      empty.textContent = "Drop or pick clip";
-      thumbWrap.appendChild(empty);
-    }
-
-    card.setAttribute("aria-busy", layer.file && !layer.ready ? "true" : "false");
-
-    slot.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      slot.classList.add("is-dragover");
-    });
-    slot.addEventListener("dragleave", () => slot.classList.remove("is-dragover"));
-    slot.addEventListener("drop", async (event) => {
-      event.preventDefault();
-      slot.classList.remove("is-dragover");
-      const [file] = event.dataTransfer.files;
-      if (!file || !isProbablyVideoFile(file)) {
-        setStatus("Drop a video file (.mp4, .webm, .mov, …).", { error: true });
-        return;
-      }
-      try {
-        await loadVideoLayer(layer.id, file);
-      } catch {
-        /* loadVideoLayer sets status */
-      }
-    });
-
-    const prime = document.createElement("div");
-    prime.className = "layer-controls-prime";
-
-    const fitGroup = document.createElement("div");
-    fitGroup.className = "layer-canvas-fit";
-    fitGroup.setAttribute("role", "radiogroup");
-    fitGroup.setAttribute("aria-label", `Layer ${layer.id} canvas fit`);
-
-    const btnFit = document.createElement("button");
-    btnFit.type = "button";
-    btnFit.className = "layer-canvas-fit__btn";
-    btnFit.textContent = "Fit";
-    btnFit.setAttribute("role", "radio");
-
-    const btnFill = document.createElement("button");
-    btnFill.type = "button";
-    btnFill.className = "layer-canvas-fit__btn";
-    btnFill.textContent = "Fill";
-    btnFill.setAttribute("role", "radio");
-
-    const syncFitButtons = () => {
-      const isFit = layer.canvasFit !== "fill";
-      btnFit.classList.toggle("is-selected", isFit);
-      btnFill.classList.toggle("is-selected", !isFit);
-      btnFit.setAttribute("aria-checked", String(isFit));
-      btnFill.setAttribute("aria-checked", String(!isFit));
-    };
-    syncFitButtons();
-    btnFit.addEventListener("click", () => {
-      layer.canvasFit = "fit";
-      syncFitButtons();
-      drawPreview(getTransportSeconds());
-      scheduleAutosave();
-    });
-    btnFill.addEventListener("click", () => {
-      layer.canvasFit = "fill";
-      syncFitButtons();
-      drawPreview(getTransportSeconds());
-      scheduleAutosave();
-    });
-    fitGroup.appendChild(btnFit);
-    fitGroup.appendChild(btnFill);
-
-    const blendSelect = document.createElement("select");
-    blendSelect.className = "select";
-    blendSelect.setAttribute("data-blend-layer", String(layer.id));
-    blendSelect.setAttribute("aria-label", `Layer ${layer.id} blend mode`);
-    blendSelect.innerHTML = SUPPORTED_BLEND_MODES.map(
-      (mode) => `<option value="${mode}">${mode}</option>`,
-    ).join("");
-    blendSelect.value = layer.blendMode;
-
-    const clearBtn = document.createElement("button");
-    clearBtn.type = "button";
-    clearBtn.className = "button button-danger";
-    clearBtn.textContent = "Clear";
-
-    prime.appendChild(fitGroup);
-    prime.appendChild(blendSelect);
-    prime.appendChild(clearBtn);
-
-    const more = document.createElement("details");
-    more.className = "layer-controls-more";
-    const moreSum = document.createElement("summary");
-    moreSum.textContent = "Layer options";
-    const moreBody = document.createElement("div");
-    moreBody.className = "layer-controls-more__body";
-
-    const rowBars = document.createElement("div");
-    rowBars.className = "layer-actions-row layer-bars-row";
-    const barsLabel = document.createElement("label");
-    barsLabel.className = "muted";
-    barsLabel.textContent = "Clip loop";
-    barsLabel.setAttribute("for", `layer-bars-${layer.id}`);
-    const barsSelect = document.createElement("select");
-    barsSelect.id = `layer-bars-${layer.id}`;
-    barsSelect.className = "select";
-    for (const n of [1, 2, 4]) {
-      const opt = document.createElement("option");
-      opt.value = String(n);
-      opt.textContent = n === 1 ? "1 bar" : `${n} bars`;
-      barsSelect.appendChild(opt);
-    }
-    barsSelect.value = String(normalizeBarsPerLoop(layer.barsPerLoop));
-    barsSelect.disabled = !layer.file;
-    barsSelect.addEventListener("change", () => {
-      const v = Number(barsSelect.value);
-      layer.barsPerLoop = v === 2 || v === 4 ? v : 1;
-      layer.barsPerLoopLocked = true;
-      applyPlaybackRates();
-      syncLayerVideos(getTransportSeconds());
-      renderLayers();
-      drawPreview(getTransportSeconds());
-      scheduleAutosave();
-    });
-    rowBars.appendChild(barsLabel);
-    rowBars.appendChild(barsSelect);
-
-    const rowOpacity = document.createElement("div");
-    rowOpacity.className = "layer-opacity-row";
-    const opacityLabel = document.createElement("label");
-    opacityLabel.className = "muted layer-opacity-label";
-    opacityLabel.textContent = "Opacity";
-    opacityLabel.setAttribute("for", `layer-opacity-${layer.id}`);
-    const opacityRange = document.createElement("input");
-    opacityRange.id = `layer-opacity-${layer.id}`;
-    opacityRange.className = "input layer-opacity-range";
-    opacityRange.type = "range";
-    opacityRange.min = "0";
-    opacityRange.max = "100";
-    opacityRange.step = "1";
-    opacityRange.value = String(Math.round((layer.opacity ?? 1) * 100));
-    const opacityValue = document.createElement("span");
-    opacityValue.className = "opacity-value";
-    opacityValue.textContent = `${opacityRange.value}%`;
-    const syncOpacity = () => {
-      layer.opacity = Number(opacityRange.value) / 100;
-      opacityValue.textContent = `${opacityRange.value}%`;
-      drawPreview(getTransportSeconds());
-      scheduleAutosave();
-    };
-    opacityRange.addEventListener("input", syncOpacity);
-    rowOpacity.appendChild(opacityLabel);
-    rowOpacity.appendChild(opacityRange);
-    rowOpacity.appendChild(opacityValue);
-
-    moreBody.appendChild(rowBars);
-    moreBody.appendChild(rowOpacity);
-    more.appendChild(moreSum);
-    more.appendChild(moreBody);
-
-    const controls = document.createElement("div");
-    controls.className = "layer-actions";
-    controls.appendChild(prime);
-    controls.appendChild(more);
-
-    card.appendChild(header);
-    card.appendChild(slot);
-    card.appendChild(controls);
-    elements.layersGrid.appendChild(card);
-
-    blendSelect.addEventListener("change", (event) => {
-      layer.blendMode = event.target.value;
-      drawPreview(getTransportSeconds());
-      scheduleAutosave();
-    });
-
-    clearBtn.addEventListener("click", () => clearLayer(layer.id));
-  }
 }
 
 /**
@@ -1928,7 +1397,7 @@ async function loadVideoLayer(id, file, options = {}) {
         setStatus(`${file.name}: preview transcode failed — ${message}`, { error: true });
         renderLayers();
         drawPreview(getTransportSeconds());
-        updateTransportDisplays(getTransportSeconds());
+        transportUi.updateTransportDisplays(getTransportSeconds());
         throw e2;
       }
     } else {
@@ -1937,7 +1406,7 @@ async function loadVideoLayer(id, file, options = {}) {
       setStatus(`${file.name}: ${message}`, { error: true });
       renderLayers();
       drawPreview(getTransportSeconds());
-      updateTransportDisplays(getTransportSeconds());
+      transportUi.updateTransportDisplays(getTransportSeconds());
       throw error;
     }
   }
@@ -1954,7 +1423,7 @@ async function loadVideoLayer(id, file, options = {}) {
   renderLayers();
   syncLayerVideos(getTransportSeconds());
   drawPreview(getTransportSeconds());
-  updateTransportDisplays(getTransportSeconds());
+  transportUi.updateTransportDisplays(getTransportSeconds());
   if (!devAutoloadBatch) {
     setStatus(
       previewViaTranscode
@@ -2156,6 +1625,31 @@ function scheduleAutosave() {
     autosaveTimer = null;
     void flushAutosaveToDisk();
   }, AUTOSAVE_DEBOUNCE_MS);
+}
+
+const layerUi = createLayerUi({
+  getState: () => state,
+  getElements: () => elements,
+  slotThumbBitmapW: SLOT_THUMB_BITMAP_W,
+  slotThumbBitmapH: SLOT_THUMB_BITMAP_H,
+  supportedBlendModes: SUPPORTED_BLEND_MODES,
+  mountLayerVideoInStaging,
+  drawLayerSlotPlaceholder,
+  queueSlotThumbPaint,
+  normalizeBarsPerLoop,
+  loadVideoLayer,
+  setStatus,
+  getTransportSeconds,
+  drawPreview,
+  scheduleAutosave,
+  applyPlaybackRates,
+  syncLayerVideos,
+  clearLayer,
+  isProbablyVideoFile,
+});
+
+function renderLayers() {
+  layerUi.renderLayers();
 }
 
 /**
@@ -2366,8 +1860,8 @@ async function tryRestoreAutosaveAsync() {
     }
 
     renderLayers();
-    updateTransportDisplays(getTransportSeconds());
-    updateLayerClipRings(getTransportSeconds());
+    transportUi.updateTransportDisplays(getTransportSeconds());
+    layerUi.updateLayerClipRings(getTransportSeconds());
     drawPreview(getTransportSeconds());
 
     const had = Boolean(/** @type {{ hadMediaAtLastSave?: boolean }} */ (snap).hadMediaAtLastSave);
@@ -3015,9 +2509,7 @@ function wireEvents() {
   elements.metroClickToggle?.addEventListener("change", async () => {
     try {
       await resumeAudioContext();
-      if (elements.metroClickToggle?.checked && metronomeClickContext?.state === "suspended") {
-        await metronomeClickContext.resume();
-      }
+      await transportUi.resumeMetronomeClickContextIfNeeded();
     } catch {
       /* ignore */
     }
@@ -3050,8 +2542,8 @@ function initialize() {
   }
   syncOutputControlsFromState();
   renderLayers();
-  updateTransportDisplays(0);
-  updateLayerClipRings(0);
+  transportUi.updateTransportDisplays(0);
+  layerUi.updateLayerClipRings(0);
   drawPreview(0);
   wireEvents();
   syncLiveAudioButton();
@@ -3059,123 +2551,6 @@ function initialize() {
   installTestHarness();
   setStatus("Browser canvas output is ready. Add video layers to begin.");
 }
-
-/**
- * Base URL for resolving dev autoload paths (`demo-clips/...`) so it works when the
- * page is `/app` (no trailing slash) — relative URLs must not drop the `/app/` prefix.
- * @returns {URL}
- */
-function devAutoloadAppDirectoryBase() {
-  const u = new URL(window.location.href);
-  let path = u.pathname;
-  if (!path.endsWith("/")) {
-    const parts = path.split("/").filter(Boolean);
-    const last = parts.length ? parts[parts.length - 1] : "";
-    if (last && last.includes(".")) {
-      parts.pop();
-    }
-    path = `/${parts.join("/")}`;
-    if (path !== "/") {
-      path = `${path}/`;
-    }
-  }
-  u.pathname = path || "/";
-  return u;
-}
-
-/**
- * Safe filename for a demo WebM (manifest entries and demo-clips/ children).
- * Rejects path separators, traversal, and odd encodings.
- * @param {string} name
- */
-function assertSafeDemoWebmFilename(name) {
-  if (typeof name !== "string" || !name || name.length > 200) {
-    throw new Error("invalid clip filename");
-  }
-  if (name !== name.trim() || name.includes("/") || name.includes("\\")) {
-    throw new Error("invalid clip filename");
-  }
-  if (!/^[\w.-]+\.webm$/.test(name)) {
-    throw new Error("invalid clip filename");
-  }
-}
-
-/**
- * Resolve a dev-only autoload path to a same-origin URL + safe filename.
- * Blocks absolute URLs, scheme-relative URLs, traversal, and paths outside
- * `demo-clips/<name>.webm` or `fixture-debug.webm` next to the app.
- * @param {string} rawPath from query string (e.g. `demo-clips/11-mandelbrot.webm`)
- * @returns {{ url: URL, filename: string }}
- */
-function resolveAutoloadWebmPath(rawPath) {
-  const trimmed = rawPath.trim();
-  if (!trimmed.endsWith(".webm")) {
-    throw new Error("autoload path must end with .webm");
-  }
-  if (trimmed.includes("://") || trimmed.startsWith("//")) {
-    throw new Error("autoload path must be relative (no URL scheme)");
-  }
-  const forward = trimmed.replace(/\\/g, "/");
-  if (forward.includes("../") || forward.split("/").includes("..")) {
-    throw new Error("path traversal is not allowed");
-  }
-  let decoded;
-  try {
-    decoded = decodeURIComponent(forward);
-  } catch {
-    throw new Error("invalid path encoding");
-  }
-  if (decoded.includes("../") || decoded.split("/").includes("..")) {
-    throw new Error("path traversal is not allowed");
-  }
-  const url = new URL(decoded, devAutoloadAppDirectoryBase());
-  if (url.origin !== window.location.origin) {
-    throw new Error("cross-origin autoload is not allowed");
-  }
-  if (url.pathname.includes("/../") || url.pathname.includes("/..")) {
-    throw new Error("invalid path");
-  }
-
-  const p = url.pathname;
-  const demo = /\/demo-clips\/([^/]+)$/.exec(p);
-  if (demo) {
-    assertSafeDemoWebmFilename(demo[1]);
-    return { url, filename: demo[1] };
-  }
-  if (/\/fixture-debug\.webm$/.test(p)) {
-    return { url, filename: "fixture-debug.webm" };
-  }
-  throw new Error("autoload path must be demo-clips/<name>.webm or fixture-debug.webm");
-}
-
-/** Same-origin `demo-clips/manifest.json` clip list (throws if missing or empty). */
-async function fetchDemoClipsManifestEntries() {
-  const manifestUrl = new URL("demo-clips/manifest.json", devAutoloadAppDirectoryBase());
-  const manRes = await fetch(manifestUrl);
-  if (!manRes.ok) {
-    throw new Error(
-      `No ${manifestUrl.pathname} (${manRes.status}). Run: bash scripts/generate-demo-clips.sh`,
-    );
-  }
-  const manifest = await manRes.json();
-  const clips = Array.isArray(manifest) ? manifest : manifest.clips;
-  if (!Array.isArray(clips) || clips.length === 0) {
-    throw new Error("demo-clips/manifest.json has no clips");
-  }
-  return clips;
-}
-
-/** True when the app is served over http(s) on a loopback host (dev server only). */
-function isPulseHzLoopbackDevHost() {
-  if (window.location.protocol === "file:") {
-    return false;
-  }
-  const h = window.location.hostname.toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
-}
-
-/** How many layers to fill from `manifest.json` on loopback when `autoload` is omitted. */
-const DEV_STARTUP_DEMO_LAYERS = 3;
 
 /**
  * Fetch one demo clip blob and assign it to a layer (dev autoload / startup).
@@ -3199,118 +2574,6 @@ async function loadClipFromResolvedUrl(url, filename, layerId, batch = false, de
   await loadVideoLayer(layerId, file, opts);
 }
 
-/**
- * Dev-only demo loading (`scripts/generate-demo-clips.sh`).
- *
- * Query **`autoload`**:
- * - `1` or `first` — first manifest clip → layer 1.
- * - `random` — random manifest clip → layer 1.
- * - `all` — first min(4, N) clips → layers 1–4.
- * - `fixture` — `fixture-debug.webm` next to the app (optional).
- * - path ending in `.webm` — same-origin allowlisted path → layer 1.
- * - `off` or `none` — skip all demo loading (including loopback startup).
- *
- * When **`autoload` is omitted** and the host is **localhost / 127.0.0.1 / ::1**, loads the first
- * **min(3, N)** manifest clips into layers 1–3. Use **`?autoload=off`** to open a blank stack on loopback.
- */
-async function maybeDevAutoload() {
-  const q = new URLSearchParams(window.location.search);
-  const raw = q.get("autoload");
-
-  if (raw !== null) {
-    const trimmed = raw.trim();
-    const kw = trimmed.toLowerCase();
-    if (kw === "off" || kw === "none") {
-      return;
-    }
-    if (trimmed === "") {
-      return;
-    }
-
-    try {
-      if (trimmed.endsWith(".webm")) {
-        const path = trimmed.replace(/^\//, "");
-        const { url, filename } = resolveAutoloadWebmPath(path);
-        await loadClipFromResolvedUrl(url, filename, 1, false, path);
-        return;
-      }
-
-      if (kw === "fixture") {
-        const rel = "fixture-debug.webm";
-        const { url, filename } = resolveAutoloadWebmPath(rel);
-        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
-        return;
-      }
-
-      const clips = await fetchDemoClipsManifestEntries();
-
-      if (kw === "1" || kw === "first") {
-        assertSafeDemoWebmFilename(clips[0]);
-        const rel = `demo-clips/${clips[0]}`;
-        const { url, filename } = resolveAutoloadWebmPath(rel);
-        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
-        return;
-      }
-      if (kw === "random") {
-        const pick = clips[Math.floor(Math.random() * clips.length)];
-        assertSafeDemoWebmFilename(pick);
-        const rel = `demo-clips/${pick}`;
-        const { url, filename } = resolveAutoloadWebmPath(rel);
-        await loadClipFromResolvedUrl(url, filename, 1, false, rel);
-        return;
-      }
-      if (kw === "all") {
-        const n = Math.min(4, clips.length);
-        for (let i = 0; i < n; i++) {
-          assertSafeDemoWebmFilename(clips[i]);
-          const rel = `demo-clips/${clips[i]}`;
-          const { url, filename } = resolveAutoloadWebmPath(rel);
-          await loadClipFromResolvedUrl(url, filename, i + 1, true, rel);
-        }
-        setStatus(`Dev autoload: loaded ${n} demo clips into layers 1–${n}.`);
-        return;
-      }
-
-      setStatus(
-        `Unknown autoload=${trimmed}. Use: 1, first, random, all, fixture, off, none, or a path ending in .webm`,
-        { error: true },
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setStatus(`Dev autoload failed: ${msg}`, { error: true });
-    }
-    return;
-  }
-
-  if (!isPulseHzLoopbackDevHost()) {
-    return;
-  }
-
-  if (skipNextDefaultDevAutoload) {
-    skipNextDefaultDevAutoload = false;
-    return;
-  }
-
-  try {
-    const clips = await fetchDemoClipsManifestEntries();
-    const n = Math.min(DEV_STARTUP_DEMO_LAYERS, clips.length);
-    for (let i = 0; i < n; i++) {
-      assertSafeDemoWebmFilename(clips[i]);
-      const rel = `demo-clips/${clips[i]}`;
-      const { url, filename } = resolveAutoloadWebmPath(rel);
-      await loadClipFromResolvedUrl(url, filename, i + 1, true, rel);
-    }
-    setStatus(
-      n === 1
-        ? "Dev startup: loaded 1 demo clip into layer 1 (loopback). Use ?autoload=off to skip."
-        : `Dev startup: loaded ${n} demo clips into layers 1–${n} (loopback). Use ?autoload=off to skip.`,
-    );
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    setStatus(`Dev startup skipped: ${msg}`, { error: true });
-  }
-}
-
 window.pulsehzApp = {
   exportHighQuality,
   exportWeb,
@@ -3323,5 +2586,9 @@ window.pulsehzApp = {
 initialize();
 void (async () => {
   await tryRestoreAutosaveAsync();
-  await maybeDevAutoload();
+  await maybeDevAutoload({
+    loadClipFromResolvedUrl,
+    setStatus,
+    tryConsumeDefaultDevAutoloadSkip,
+  });
 })();
