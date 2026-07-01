@@ -231,11 +231,16 @@ export function createTransportUi(deps) {
     }
   }
 
+  function resetTransportBeatAnnouncement() {
+    lastAnnouncedTransportBeat = null;
+  }
+
   return {
     updateSidebarSheetKickers,
     updateTransportDisplays,
     tickMetronomeUi,
     updateTransportBeatRing,
     resumeMetronomeClickContextIfNeeded,
+    resetTransportBeatAnnouncement,
   };
 }

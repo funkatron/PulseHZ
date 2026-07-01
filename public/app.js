@@ -21,7 +21,7 @@ import {
   drawPreviewFrame,
   syncPreviewBackdropChrome as wirePreviewBackdropChromeToDom,
 } from "./preview-compositor.js";
-import { createTransportUi } from "./transport-ui.js?v=20260415";
+import { createTransportUi } from "./transport-ui.js?v=20260701";
 import { createLayerUi } from "./layer-ui.js?v=20260415";
 import { maybeDevAutoload, resolveAutoloadWebmPath } from "./dev-autoload.js?v=20260415";
 
@@ -1251,7 +1251,7 @@ async function startPlayback() {
 
   state.playback.isPlaying = true;
   state.playback.startedAtMs = performance.now();
-  lastAnnouncedTransportBeat = null;
+  transportUi.resetTransportBeatAnnouncement();
 
   if (state.audio.file) {
     state.playback.usingAudioClock = true;
