@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
+pytest.importorskip("PyQt6.QtWidgets")
+
 from pulsehz.desktop_app import DesktopApp
 
 
