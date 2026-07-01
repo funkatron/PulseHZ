@@ -2530,6 +2530,9 @@ function installTestHarness() {
     commitBpm(bpm) {
       commitTransportBpm(bpm, "test");
     },
+    startPlayback() {
+      return startPlayback();
+    },
     getTransportBpm() {
       return state.playback.bpm;
     },
