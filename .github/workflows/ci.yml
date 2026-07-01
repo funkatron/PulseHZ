@@ -28,7 +28,11 @@ jobs:
         run: uv run pytest tests -q
 
       - name: Install Playwright Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/playwright
         run: uv run playwright install chromium
 
       - name: UI tests (Playwright)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/playwright
         run: uv run pytest e2e/ -q
