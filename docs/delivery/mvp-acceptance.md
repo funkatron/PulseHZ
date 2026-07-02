@@ -51,7 +51,7 @@ uv run python scripts/mvp_manual_remaining.py   # bar sync, autosave reload, Web
 | **Visual bar sync** | pass — beat 1.81→3.94, progress bar moved while Playing |
 | **Autosave reload** | pass — snapshot restored `1 / 4`, status “Restored project…” |
 | **WebM export** | pass — **493,798 bytes**, status “WebM export finished…” |
-| **Notes** | `scripts/mvp_manual_remaining.py` automates rows 5/7/8 in headless Chromium |
+| **Notes** | `scripts/mvp_manual_remaining.py` automates rows 5/7/8 in headless Chromium. Detect BPM accuracy: [#2](https://github.com/funkatron/PulseHZ/issues/2) |
 
 ---
 
