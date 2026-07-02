@@ -1,0 +1,99 @@
+[project]
+name = "pulsehz-video-glitch"
+version = "1.0.0"
+description = "Realtime music-aligned video performance (pad/session/tracker-style layering), FFmpeg export, web UI or optional desktop shell"
+authors = [
+    {name = "PulseHZ", email = "coj@funkatron.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = [
+    "video",
+    "compositing",
+    "browser",
+    "bpm",
+    "tempo",
+    "ffmpeg",
+    "glitch",
+    "blending",
+    "desktop",
+    "pyqt",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "fastapi>=0.116.0",
+    "uvicorn[standard]>=0.35.0",
+    "python-multipart>=0.0.20",
+    "pydantic>=2.11.0",
+    "opencv-python>=4.8.0",
+    "numpy<2,>=1.24.0",
+    "pillow>=11.0.0",
+    "pyqt6>=6.6.0",
+    "pyqt6-webengine>=6.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+audio = [
+    "librosa>=0.10.2",
+    "soundfile>=0.12.1",
+]
+e2e = [
+    "pytest-playwright>=0.5.0",
+]
+
+[project.scripts]
+pulsehz = "pulsehz.main:main"
+pulsehz-desktop = "pulsehz.main:run_desktop"
+pulsehz-server = "pulsehz.main:run_server"
+pulsehz-client = "pulsehz.main:run_client"
+
+[project.urls]
+Homepage = "https://github.com/funkatron/PulseHZ"
+Repository = "https://github.com/funkatron/PulseHZ"
+Issues = "https://github.com/funkatron/PulseHZ/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pulsehz"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "e2e: browser UI tests (install: uv sync --extra e2e && playwright install chromium; run: pytest e2e/)",
+]

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PulseHZ</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.2.5/index.css"
+    />
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.2.5/500.css"
+    />
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.2.5/600.css"
+    />
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@5.2.5/700.css"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260414ux3" />
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="panel sidebar">
+            <section class="section section--brand">
+                <h1 class="brand-title">PulseHZ</h1>
+                <details class="sidebar-details">
+                    <summary class="sidebar-details__summary">About</summary>
+                    <div class="sidebar-details__body">
+                        <p class="brand-tagline brand-tagline--in-details">
+                            Layered video composited in the browser, locked to tempo—live stack energy without giving up legibility.
+                            <span class="brand-technical" aria-hidden="true">←[!]→ · cpu · signal · cut</span>
+                        </p>
+                    </div>
+                </details>
+            </section>
+
+            <section class="section section--perform">
+                <h2>Perform</h2>
+                <label class="muted" for="project-name">Project Name</label>
+                <input id="project-name" class="input" type="text" value="Browser First MVP" />
+                <div class="button-row">
+                    <button id="play-button" class="button button-accent" type="button">Play</button>
+                    <button id="pause-button" class="button" type="button">Pause</button>
+                </div>
+                <label class="muted" for="manual-bpm">Manual BPM</label>
+                <input id="manual-bpm" class="input" type="number" min="40" max="220" step="0.1" value="120" />
+                <div class="metro-toggles">
+                    <label class="metro-toggle">
+                        <input id="metro-visual-toggle" type="checkbox" checked />
+                        <span>Visual downbeat</span>
+                    </label>
+                    <label class="metro-toggle">
+                        <input id="metro-click-toggle" type="checkbox" />
+                        <span>Metronome click</span>
+                    </label>
+                </div>
+                <label class="muted" for="auto-demo-grid-select">Auto demo</label>
+                <select id="auto-demo-grid-select" class="input" aria-label="Auto demo on beat or bar for every loaded layer, staggered by slot">
+                    <option value="off" selected>Off</option>
+                    <option value="beat">Each beat (blend cycle)</option>
+                    <option value="bar">Each bar (opacity pattern)</option>
+                    <option value="both">Beat + bar</option>
+                </select>
+                <details class="sidebar-details">
+                    <summary class="sidebar-details__summary">How auto demo works</summary>
+                    <div class="sidebar-details__body">
+                        <p class="muted sidebar-details__prose">
+                            Transport-locked steps on every loaded layer (slot 1–4 adds that offset to the beat/bar index): beat rotates blend mode; bar rotates opacity. Editor-only, not in export JSON. Press Play.
+                        </p>
+                    </div>
+                </details>
+            </section>
+
+            <details class="sidebar-details sidebar-sheet">
+                <summary class="sidebar-details__summary">
+                    Patch &amp; calibration
+                    <span id="sidebar-kicker-patch" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
+                <div class="sidebar-details__body sidebar-sheet__body">
+                    <section class="section section--nested">
+                        <h3 class="sidebar-subhead">Audio</h3>
+                        <input id="audio-input" class="input" type="file" accept="audio/*" />
+                        <div id="audio-prescan-hint" class="muted audio-prescan-hint hidden" aria-live="polite"></div>
+                        <audio id="audio-element" class="hidden" controls></audio>
+                        <label class="muted" for="audio-device-select">Capture device</label>
+                        <select id="audio-device-select" class="input" aria-label="Audio capture device">
+                            <option value="">Default input</option>
+                        </select>
+                        <div class="button-row">
+                            <button id="refresh-audio-devices-button" class="button" type="button">Refresh devices</button>
+                            <button id="live-audio-button" class="button" type="button">Live capture</button>
+                        </div>
+                        <details class="sidebar-details">
+                            <summary class="sidebar-details__summary">Capture &amp; BPM tips</summary>
+                            <div class="sidebar-details__body">
+                                <p class="muted sidebar-details__prose">
+                                    Pick a loopback device (e.g. BlackHole on macOS) to tap another app’s output, or your mic. Browsers list loopback as an audio input. Use headphones if you monitor a live mic.
+                                </p>
+                                <p class="muted sidebar-details__prose">
+                                    With live capture on, tempo is estimated continuously from the input (fast). Use Detect BPM for a one-shot from a file, or a longer refinement while live.
+                                </p>
+                            </div>
+                        </details>
+                        <div class="button-row">
+                            <button id="detect-bpm-button" class="button" type="button">Detect BPM</button>
+                            <button id="clear-audio-button" class="button button-danger" type="button">Clear Audio</button>
+                        </div>
+                        <div class="stat-grid">
+                            <div class="stat">
+                                <div class="stat-label">Detected BPM</div>
+                                <div id="detected-bpm" class="stat-value">--</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-label">Bar Length</div>
+                                <div id="bar-duration" class="stat-value">2.00s</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="section section--nested">
+                        <h3 class="sidebar-subhead">Output canvas</h3>
+                        <details class="sidebar-details">
+                            <summary class="sidebar-details__summary">Scaling &amp; frame</summary>
+                            <div class="sidebar-details__body">
+                                <p class="muted sidebar-details__prose">
+                                    Fixed resolution and aspect for preview, WebM capture, and ProRes export. Each layer is scaled uniformly to fit inside this frame; aspect ratio is preserved (letterboxing) by default.
+                                </p>
+                            </div>
+                        </details>
+                        <label class="muted" for="output-tier-select">Resolution tier</label>
+                        <select id="output-tier-select" class="input" aria-label="Output resolution tier">
+                            <option value="720p">720p</option>
+                            <option value="1080p" selected>1080p</option>
+                            <option value="2160p">2160p (4K)</option>
+                            <option value="720x1720">720×1720</option>
+                            <option value="1440x3440">1440×3440</option>
+                        </select>
+                        <label class="muted" for="output-aspect-select">Aspect ratio</label>
+                        <select id="output-aspect-select" class="input" aria-label="Output aspect ratio">
+                            <option value="16:9" selected>16∶9</option>
+                            <option value="9:16">9∶16</option>
+                            <option value="21:9">21∶9 (ultrawide)</option>
+                            <option value="9:21">9∶21 (tall ultrawide)</option>
+                            <option value="1:1">1∶1 (square, short edge from tier)</option>
+                        </select>
+                        <label class="muted" for="output-backdrop-select">Backdrop</label>
+                        <select id="output-backdrop-select" class="input" aria-label="Compositor backdrop">
+                            <option value="black" selected>Black</option>
+                            <option value="white">White</option>
+                            <option value="transparent">Transparent (checkerboard in editor)</option>
+                        </select>
+                        <div id="output-dimensions-label" class="muted">Canvas: 1920×1080</div>
+                        <details class="sidebar-details">
+                            <summary class="sidebar-details__summary">Export notes &amp; demo LFO</summary>
+                            <div class="sidebar-details__body">
+                                <p class="muted sidebar-details__prose">
+                                    ProRes: black/white use an opaque YUV 4:4:4 plate. With Transparent backdrop, export uses ProRes 4444 with alpha (yuva444p10le): a luma + chroma + alpha plane. Clips with alpha or translucent comp pixels carry through where filters preserve alpha; many players flatten alpha when previewing.
+                                </p>
+                                <div class="button-row button-row--single">
+                                    <button id="demo-lfo-opacity-button" class="button" type="button">Toggle demo LFO (layer 1 opacity)</button>
+                                </div>
+                                <p class="muted sidebar-details__prose">
+                                    Adds a BPM-locked sine route in controls.modulation; uses transport time. ProRes export still ignores automation until baked into the FFmpeg graph.
+                                </p>
+                            </div>
+                        </details>
+                    </section>
+                </div>
+            </details>
+
+            <details class="sidebar-details sidebar-sheet">
+                <summary class="sidebar-details__summary">
+                    Export
+                    <span id="sidebar-kicker-export" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
+                <div class="sidebar-details__body sidebar-sheet__body">
+                    <div class="button-row">
+                        <button id="export-high-button" class="button button-accent" type="button">Export ProRes</button>
+                        <button id="export-web-button" class="button" type="button">Export WebM</button>
+                    </div>
+                </div>
+            </details>
+
+            <details class="sidebar-details sidebar-sheet">
+                <summary class="sidebar-details__summary">
+                    Status &amp; fine telemetry
+                    <span id="sidebar-kicker-status" class="sidebar-sheet-kicker" aria-hidden="true"></span>
+                </summary>
+                <div class="sidebar-details__body sidebar-sheet__body">
+                    <div class="stat-grid">
+                        <div class="stat">
+                            <div class="stat-label">Current Beat</div>
+                            <div id="current-beat" class="stat-value">1.00</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Loaded Layers</div>
+                            <div id="loaded-layers" class="stat-value">0 / 4</div>
+                        </div>
+                    </div>
+                    <p class="muted sidebar-details__prose">Bar phase (legacy linear). Prefer the beat ring on the preview.</p>
+                    <div class="transport-progress"><div id="transport-progress-bar" class="transport-progress-bar"></div></div>
+                </div>
+            </details>
+
+            <section class="section section--meter">
+                <div class="muted">Realtime level (sidebar)</div>
+                <div class="meter"><div id="meter-bar" class="meter-bar"></div></div>
+            </section>
+
+            <div id="status-line" class="status-line">Drop a few videos and an audio track to get started.</div>
+        </aside>
+
+        <main class="workspace">
+            <div class="feed-hint" aria-hidden="true">program · iso · multilayer feed</div>
+            <section class="panel preview-panel">
+                <div id="preview-canvas-wrap" class="preview-canvas-wrap">
+                    <canvas id="preview-canvas" class="preview-canvas" width="1920" height="1080"></canvas>
+                    <div id="preview-status" class="preview-status">Drop video clips into the layer slots to build a live composite.</div>
+                    <div class="preview-instruments" aria-label="Transport instruments">
+                        <div
+                            id="transport-grid-announce"
+                            class="visually-hidden"
+                            aria-live="polite"
+                            aria-atomic="true"
+                        ></div>
+                        <div class="preview-telemetry" title="Live audio level and tempo readouts">
+                            <div class="preview-telemetry__row">
+                                <span class="preview-telemetry__label">Level</span>
+                                <div class="meter meter--preview"><div id="meter-bar-preview" class="meter-bar"></div></div>
+                            </div>
+                            <div class="preview-telemetry__row preview-telemetry__stats">
+                                <span id="preview-detected-bpm" class="preview-telemetry__stat">BPM --</span>
+                                <span id="preview-bar-duration" class="preview-telemetry__stat">Bar --</span>
+                                <span id="preview-bpm-map-status" class="preview-telemetry__stat preview-telemetry__stat--muted"></span>
+                            </div>
+                        </div>
+                        <div class="transport-beat-ring-host" aria-hidden="true">
+                            <svg
+                                id="transport-beat-ring"
+                                class="transport-beat-ring"
+                                viewBox="0 0 100 100"
+                                role="img"
+                                aria-label="Beat and bar phase"
+                            >
+                                <circle class="transport-beat-ring__track" cx="50" cy="50" r="40" pathLength="100" />
+                                <circle
+                                    id="transport-beat-ring-progress"
+                                    class="transport-beat-ring__progress"
+                                    cx="50"
+                                    cy="50"
+                                    r="40"
+                                    pathLength="100"
+                                    stroke-dasharray="100"
+                                    stroke-dashoffset="100"
+                                />
+                                <g id="transport-beat-ring-ticks"></g>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="preview-overlay">
+                        <div id="preview-output-label" class="preview-pill">Canvas 1920×1080, captureStream()</div>
+                        <div id="preview-transport-label" class="preview-pill">Stopped</div>
+                    </div>
+                </div>
+            </section>
+
+            <section
+                id="layers-grid"
+                class="layers-grid layer-strip"
+                aria-label="Video layers"
+            ></section>
+            <p class="clip-strip-hint muted">
+                Slots: <kbd>1</kbd>–<kbd>4</kbd> focus · <kbd>←</kbd><kbd>→</kbd> move · <kbd>f</kbd> Fit/Fill ·
+                <kbd>Del</kbd> clear
+            </p>
+        </main>
+    </div>
+
+    <script type="module" src="./app.js?v=20260415ux2"></script>
+</body>
+</html>

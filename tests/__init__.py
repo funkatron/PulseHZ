@@ -1,0 +1,1 @@
+# Tests for PulseHZ Video Glitch Tool
