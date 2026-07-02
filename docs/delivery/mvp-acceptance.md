@@ -19,6 +19,7 @@ Run the scripted partial pass (server must be up on 6066):
 
 ```bash
 uv run python scripts/mvp_acceptance_check.py
+uv run python scripts/mvp_manual_remaining.py   # bar sync, autosave reload, WebM export
 ```
 
 ---
@@ -43,14 +44,14 @@ uv run python scripts/mvp_acceptance_check.py
 
 | Field | Value |
 |-------|--------|
-| **Branch / commit** | `feature/browser-first-mvp` @ `________` |
-| **Tester** | |
-| **Date** | |
-| **Detect BPM result** | manual ___ / detected ___ (Δ ___) |
-| **Visual bar sync** | pass / fail / skipped |
-| **Autosave reload** | pass / fail / skipped |
-| **WebM export** | pass / fail / skipped |
-| **Notes** | |
+| **Branch / commit** | `feature/browser-first-mvp` @ `6ed7ab0` (+ manual script) |
+| **Tester** | agent / local Playwright (2026-07-02) |
+| **Date** | 2026-07-02 |
+| **Detect BPM result** | manual 136 / detected 161.5 (Δ 25.5) — plausible, not ideal ±2 |
+| **Visual bar sync** | pass — beat 1.81→3.94, progress bar moved while Playing |
+| **Autosave reload** | pass — snapshot restored `1 / 4`, status “Restored project…” |
+| **WebM export** | pass — **493,798 bytes**, status “WebM export finished…” |
+| **Notes** | `scripts/mvp_manual_remaining.py` automates rows 5/7/8 in headless Chromium |
 
 ---
 
